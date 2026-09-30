@@ -1,6 +1,7 @@
 package com.example.dukaan.data.remote
 
 import android.util.Log
+import com.example.dukaan.data.local.AttendanceEventEntity
 import com.example.dukaan.data.local.BusinessEntity
 import com.example.dukaan.data.local.EmployeeEntity
 import com.example.dukaan.data.model.CurrentUser
@@ -13,6 +14,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 object SupabaseClient {
@@ -93,7 +95,6 @@ object SupabaseClient {
 
     /**
      * Registers a new shop in Supabase Auth using the Admin API.
-     * Stores full shop metadata inside user_metadata so any Superadmin device can see and manage it live.
      */
     suspend fun registerShopInSupabase(
         business: BusinessEntity,
@@ -153,7 +154,6 @@ object SupabaseClient {
                 Result.success(userId)
             } else {
                 Log.w(TAG, "Register shop in Supabase error: ${response.code} $resStr")
-                // If user already exists, update user_metadata
                 if (resStr.contains("already registered", ignoreCase = true) || response.code == 422) {
                     val updateResult = updateShopMetadataByEmail(business.email, userMeta, rawPassword)
                     return@withContext updateResult
@@ -337,8 +337,248 @@ object SupabaseClient {
     }
 
     /**
-     * Helper to find a user by shop_id or user.id
+     * Registers an employee in Supabase Auth so they can log in from their own phone.
      */
+    suspend fun registerEmployeeInSupabase(
+        employee: EmployeeEntity,
+        rawPassword: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val userEmail = if (employee.email.isNotBlank()) {
+                employee.email.trim()
+            } else {
+                "${employee.phone.trim()}@employee.dukaan"
+            }
+
+            val meta = JSONObject().apply {
+                put("role", "EMPLOYEE")
+                put("employee_id", employee.id)
+                put("business_id", employee.businessId)
+                put("employee_code", employee.employeeCode)
+                put("full_name", employee.fullName)
+                put("name", employee.fullName)
+                put("phone", employee.phone)
+                put("email", userEmail)
+                put("password", rawPassword)
+                put("address", employee.address)
+                put("designation", employee.designation)
+                put("joining_date", employee.joiningDate)
+                put("salary_type", employee.salaryType)
+                put("monthly_salary", employee.monthlySalary)
+                put("daily_wage", employee.dailyWage)
+                put("custom_daily_rate", employee.customDailyRate)
+                put("bank_account", employee.bankAccount)
+                put("bank_ifsc", employee.bankIfsc)
+                put("emergency_contact", employee.emergencyContact)
+                put("status", employee.status)
+            }
+
+            val bodyJson = JSONObject().apply {
+                put("email", userEmail)
+                put("password", rawPassword)
+                put("email_confirm", true)
+                put("user_metadata", meta)
+            }
+
+            val request = Request.Builder()
+                .url("$SUPABASE_URL/auth/v1/admin/users")
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .addHeader("Content-Type", "application/json")
+                .post(bodyJson.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val resStr = response.body?.string().orEmpty()
+            if (response.isSuccessful) {
+                val json = JSONObject(resStr)
+                Result.success(json.optString("id", employee.id))
+            } else {
+                if (resStr.contains("already registered", ignoreCase = true) || response.code == 422) {
+                    val updateRes = updateEmployeeMetadataByContact(employee.phone, userEmail, meta, rawPassword)
+                    return@withContext updateRes
+                }
+                Result.failure(Exception("Employee creation failed: ${response.code} $resStr"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetches all employees live from Supabase.
+     */
+    suspend fun fetchAllEmployeesFromSupabase(businessId: String? = null): Result<List<EmployeeEntity>> = withContext(Dispatchers.IO) {
+        try {
+            val url = "$SUPABASE_URL/auth/v1/admin/users?per_page=100"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .get()
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val resStr = response.body?.string().orEmpty()
+            if (response.isSuccessful) {
+                val json = JSONObject(resStr)
+                val usersArray = json.optJSONArray("users") ?: JSONArray()
+                val list = mutableListOf<EmployeeEntity>()
+
+                for (i in 0 until usersArray.length()) {
+                    val u = usersArray.getJSONObject(i)
+                    val meta = u.optJSONObject("user_metadata") ?: JSONObject()
+                    val role = meta.optString("role", "")
+                    val bId = meta.optString("business_id", "")
+
+                    if (role.equals("EMPLOYEE", ignoreCase = true) && (businessId == null || bId == businessId)) {
+                        val empId = meta.optString("employee_id", u.optString("id"))
+                        val entity = EmployeeEntity(
+                            id = empId,
+                            businessId = bId,
+                            employeeCode = meta.optString("employee_code", "EMP-001"),
+                            fullName = meta.optString("full_name", meta.optString("name", "Employee")),
+                            photoUrl = meta.optString("photo_url", ""),
+                            phone = meta.optString("phone", ""),
+                            email = u.optString("email", ""),
+                            password = meta.optString("password", "Password123!"),
+                            address = meta.optString("address", "Staff Quarter"),
+                            designation = meta.optString("designation", "Staff"),
+                            joiningDate = meta.optString("joining_date", "2026-01-01"),
+                            salaryType = meta.optString("salary_type", "MONTHLY"),
+                            monthlySalary = meta.optDouble("monthly_salary", 15000.0),
+                            dailyWage = meta.optDouble("daily_wage", 500.0),
+                            customDailyRate = meta.optDouble("custom_daily_rate", 0.0),
+                            bankAccount = meta.optString("bank_account", ""),
+                            bankIfsc = meta.optString("bank_ifsc", ""),
+                            emergencyContact = meta.optString("emergency_contact", ""),
+                            status = meta.optString("status", "ACTIVE")
+                        )
+                        list.add(entity)
+                    }
+                }
+                Result.success(list)
+            } else {
+                Result.failure(Exception("Failed to fetch employees: ${response.code}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Records an attendance punch into Supabase on the employee's user record.
+     */
+    suspend fun recordPunchInSupabase(
+        businessId: String,
+        employeeId: String,
+        punch: AttendanceEventEntity
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val user = findSupabaseUserByEmployeeId(employeeId) ?: return@withContext Result.failure(Exception("Employee not found in Supabase"))
+            val userId = user.getString("id")
+            val currentMeta = user.optJSONObject("user_metadata") ?: JSONObject()
+            val punches = currentMeta.optJSONArray("punches") ?: JSONArray()
+
+            val punchObj = JSONObject().apply {
+                put("id", punch.id)
+                put("business_id", businessId)
+                put("employee_id", employeeId)
+                put("event_type", punch.eventType)
+                put("timestamp", punch.timestamp)
+                put("formatted_time", punch.formattedTime)
+                put("date_str", punch.dateStr)
+                put("latitude", punch.latitude)
+                put("longitude", punch.longitude)
+                put("distance", punch.distanceFromShopMeters)
+                put("is_geofence_valid", punch.isGeofenceValid)
+                put("photo_uri", punch.photoUri)
+                put("verification_method", punch.verificationMethod)
+                put("status", punch.status)
+            }
+            punches.put(punchObj)
+            currentMeta.put("punches", punches)
+
+            val putUrl = "$SUPABASE_URL/auth/v1/admin/users/$userId"
+            val body = JSONObject().apply {
+                put("user_metadata", currentMeta)
+            }
+            val req = Request.Builder()
+                .url(putUrl)
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .addHeader("Content-Type", "application/json")
+                .put(body.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            val res = httpClient.newCall(req).execute()
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetches all live attendance punches from Supabase for a business.
+     */
+    suspend fun fetchPunchesForBusiness(businessId: String): Result<List<AttendanceEventEntity>> = withContext(Dispatchers.IO) {
+        try {
+            val url = "$SUPABASE_URL/auth/v1/admin/users?per_page=100"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .get()
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val resStr = response.body?.string().orEmpty()
+            if (response.isSuccessful) {
+                val json = JSONObject(resStr)
+                val usersArray = json.optJSONArray("users") ?: JSONArray()
+                val events = mutableListOf<AttendanceEventEntity>()
+
+                for (i in 0 until usersArray.length()) {
+                    val u = usersArray.getJSONObject(i)
+                    val meta = u.optJSONObject("user_metadata") ?: JSONObject()
+                    val role = meta.optString("role", "")
+                    val bId = meta.optString("business_id", "")
+
+                    if (role.equals("EMPLOYEE", ignoreCase = true) && bId == businessId) {
+                        val punches = meta.optJSONArray("punches") ?: JSONArray()
+                        for (j in 0 until punches.length()) {
+                            val p = punches.getJSONObject(j)
+                            val event = AttendanceEventEntity(
+                                id = p.optString("id", UUID.randomUUID().toString()),
+                                businessId = businessId,
+                                employeeId = p.optString("employee_id", meta.optString("employee_id", u.optString("id"))),
+                                eventType = p.optString("event_type", "IN"),
+                                timestamp = p.optLong("timestamp", System.currentTimeMillis()),
+                                formattedTime = p.optString("formatted_time", "09:00 AM"),
+                                dateStr = p.optString("date_str", "2026-09-30"),
+                                latitude = p.optDouble("latitude", 26.9124),
+                                longitude = p.optDouble("longitude", 75.7873),
+                                distanceFromShopMeters = p.optDouble("distance", 10.0),
+                                isGeofenceValid = p.optBoolean("is_geofence_valid", true),
+                                photoUri = p.optString("photo_uri", ""),
+                                verificationMethod = p.optString("verification_method", "GEOFENCE_SELFIE"),
+                                status = p.optString("status", "VERIFIED"),
+                                isOffline = false,
+                                syncStatus = "SYNCED"
+                            )
+                            events.add(event)
+                        }
+                    }
+                }
+                Result.success(events)
+            } else {
+                Result.failure(Exception("Failed to fetch punches: ${response.code}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private suspend fun findSupabaseUserByShopId(shopId: String): JSONObject? = withContext(Dispatchers.IO) {
         try {
             val url = "$SUPABASE_URL/auth/v1/admin/users?per_page=100"
@@ -359,6 +599,35 @@ object SupabaseClient {
                 val u = usersArray.getJSONObject(i)
                 val meta = u.optJSONObject("user_metadata") ?: JSONObject()
                 if (u.optString("id") == shopId || meta.optString("shop_id") == shopId) {
+                    return@withContext u
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private suspend fun findSupabaseUserByEmployeeId(empId: String): JSONObject? = withContext(Dispatchers.IO) {
+        try {
+            val url = "$SUPABASE_URL/auth/v1/admin/users?per_page=100"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .get()
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val resStr = response.body?.string().orEmpty()
+            if (!response.isSuccessful) return@withContext null
+
+            val json = JSONObject(resStr)
+            val usersArray = json.optJSONArray("users") ?: return@withContext null
+            for (i in 0 until usersArray.length()) {
+                val u = usersArray.getJSONObject(i)
+                val meta = u.optJSONObject("user_metadata") ?: JSONObject()
+                if (u.optString("id") == empId || meta.optString("employee_id") == empId) {
                     return@withContext u
                 }
             }
@@ -417,76 +686,50 @@ object SupabaseClient {
         }
     }
 
-    /**
-     * Signs up or creates a verified user in Supabase Authentication using the Admin API.
-     */
-    suspend fun createOrUpdateSupabaseUser(
-        email: String,
-        pass: String,
-        role: UserRole,
-        name: String,
-        businessId: String? = null,
-        employeeId: String? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
+    private suspend fun updateEmployeeMetadataByContact(phone: String, email: String, meta: JSONObject, rawPass: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val url = "$SUPABASE_URL/auth/v1/admin/users"
-            val bodyJson = JSONObject().apply {
-                put("email", email.trim())
-                put("password", pass.trim())
-                put("email_confirm", true)
-                put("user_metadata", JSONObject().apply {
-                    put("role", role.name)
-                    put("name", name)
-                    businessId?.let { put("business_id", it) }
-                    employeeId?.let { put("employee_id", it) }
-                })
-            }
+            val url = "$SUPABASE_URL/auth/v1/admin/users?per_page=100"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SECRET_KEY)
                 .addHeader("Authorization", "Bearer $SECRET_KEY")
-                .addHeader("Content-Type", "application/json")
-                .post(bodyJson.toString().toRequestBody(jsonMediaType))
+                .get()
                 .build()
 
             val response = httpClient.newCall(request).execute()
             val resStr = response.body?.string().orEmpty()
-            if (response.isSuccessful) {
-                val json = JSONObject(resStr)
-                Result.success(json.optString("id", ""))
-            } else {
-                Log.w(TAG, "Admin create user response: ${response.code} $resStr")
-                Result.failure(Exception("Supabase user creation returned ${response.code}"))
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "createOrUpdateSupabaseUser error", e)
-            Result.failure(e)
-        }
-    }
+            if (!response.isSuccessful) return@withContext Result.failure(Exception("Lookup error"))
 
-    /**
-     * Sync attendance event to remote backend.
-     */
-    suspend fun syncAttendanceToRemote(
-        attendanceJson: JSONObject
-    ): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val url = "$SUPABASE_URL/rest/v1/attendance_events"
-            val request = Request.Builder()
-                .url(url)
+            val json = JSONObject(resStr)
+            val usersArray = json.optJSONArray("users") ?: return@withContext Result.failure(Exception("No users"))
+            var targetId: String? = null
+            for (i in 0 until usersArray.length()) {
+                val u = usersArray.getJSONObject(i)
+                val m = u.optJSONObject("user_metadata") ?: JSONObject()
+                if (u.optString("email").equals(email, ignoreCase = true) || m.optString("phone") == phone) {
+                    targetId = u.optString("id")
+                    break
+                }
+            }
+            if (targetId == null) return@withContext Result.failure(Exception("Employee not found"))
+
+            val putUrl = "$SUPABASE_URL/auth/v1/admin/users/$targetId"
+            val body = JSONObject().apply {
+                put("user_metadata", meta)
+                put("password", rawPass)
+            }
+            val putReq = Request.Builder()
+                .url(putUrl)
                 .addHeader("apikey", SECRET_KEY)
                 .addHeader("Authorization", "Bearer $SECRET_KEY")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .post(attendanceJson.toString().toRequestBody(jsonMediaType))
+                .put(body.toString().toRequestBody(jsonMediaType))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                Result.success(true)
+            val putRes = httpClient.newCall(putReq).execute()
+            if (putRes.isSuccessful) {
+                Result.success(targetId)
             } else {
-                Log.w(TAG, "Remote attendance sync returned ${response.code}")
-                Result.failure(Exception("HTTP ${response.code}"))
+                Result.failure(Exception("Failed to update employee: ${putRes.code}"))
             }
         } catch (e: Exception) {
             Result.failure(e)

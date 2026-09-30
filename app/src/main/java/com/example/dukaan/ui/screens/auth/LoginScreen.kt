@@ -182,7 +182,12 @@ fun LoginScreen(
                             }
 
                             // 3. EMPLOYEE AUTHENTICATION (Real Database Check & Status Gate)
-                            val emp = repository.getEmployeeByContact(input)
+                            var emp = repository.getEmployeeByContact(input)
+                            if (emp == null) {
+                                // Sync live from Supabase in case employee was registered from Admin's phone
+                                repository.syncAllEmployeesFromSupabase()
+                                emp = repository.getEmployeeByContact(input)
+                            }
                             if (emp != null) {
                                 if (emp.password.isNotBlank() && emp.password != pass) {
                                     isLoading = false

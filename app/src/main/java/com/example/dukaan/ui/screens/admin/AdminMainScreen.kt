@@ -47,8 +47,13 @@ fun AdminMainScreen(
     val coroutineScope = rememberCoroutineScope()
 
     var business by remember { mutableStateOf<Business?>(null) }
+    var isSyncing by remember { mutableStateOf(false) }
+
     LaunchedEffect(businessId) {
         business = repository.getBusinessById(businessId)
+        isSyncing = true
+        repository.syncEmployeesAndAttendanceFromSupabase(businessId)
+        isSyncing = false
     }
 
     val employees by repository.getEmployeesForBusiness(businessId).collectAsState(initial = emptyList())
@@ -97,6 +102,26 @@ fun AdminMainScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                isSyncing = true
+                                repository.syncEmployeesAndAttendanceFromSupabase(businessId)
+                                isSyncing = false
+                                Toast.makeText(context, "Live data synced from Supabase Cloud", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = OrakleRedPrimary
+                            )
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = "Sync from Cloud", tint = OrakleSlate700)
+                        }
+                    }
                     IconButton(onClick = { showEditShopDialog = true }) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit Shop Details", tint = OrakleRedPrimary)
                     }

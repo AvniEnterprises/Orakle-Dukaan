@@ -320,18 +320,16 @@ class DukaanRepository(context: Context) {
             dao.updateEmployee(entity)
         } else {
             dao.insertEmployee(entity)
-            // Also create user in Supabase Auth if email is present
-            if (employee.email.isNotBlank()) {
-                SupabaseClient.createOrUpdateSupabaseUser(
-                    email = employee.email,
-                    pass = "Password123!",
-                    role = UserRole.EMPLOYEE,
-                    name = employee.fullName,
-                    businessId = employee.businessId,
-                    employeeId = employee.id
-                )
-            }
         }
+
+        // Live Cloud Sync of Employee to Supabase
+        try {
+            val pass = if (employee.password.isNotBlank()) employee.password else "Password123!"
+            SupabaseClient.registerEmployeeInSupabase(entity, pass)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Failed to sync employee to Supabase", e)
+        }
+
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -342,6 +340,32 @@ class DukaanRepository(context: Context) {
                 timestamp = System.currentTimeMillis()
             )
         )
+    }
+
+    suspend fun syncEmployeesAndAttendanceFromSupabase(businessId: String) = withContext(Dispatchers.IO) {
+        try {
+            val empResult = SupabaseClient.fetchAllEmployeesFromSupabase(businessId)
+            if (empResult.isSuccess) {
+                empResult.getOrNull()?.forEach { dao.insertEmployee(it) }
+            }
+            val punchResult = SupabaseClient.fetchPunchesForBusiness(businessId)
+            if (punchResult.isSuccess) {
+                punchResult.getOrNull()?.forEach { dao.insertAttendanceEvent(it) }
+            }
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "syncEmployeesAndAttendanceFromSupabase failed", e)
+        }
+    }
+
+    suspend fun syncAllEmployeesFromSupabase() = withContext(Dispatchers.IO) {
+        try {
+            val empResult = SupabaseClient.fetchAllEmployeesFromSupabase(null)
+            if (empResult.isSuccess) {
+                empResult.getOrNull()?.forEach { dao.insertEmployee(it) }
+            }
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "syncAllEmployeesFromSupabase failed", e)
+        }
     }
 
     suspend fun deleteEmployee(employeeId: String, businessId: String) = withContext(Dispatchers.IO) {
@@ -466,22 +490,13 @@ class DukaanRepository(context: Context) {
                 handleUdhaarDeductionForDay(businessId, employeeId, todayStr, eventEntity.id)
             }
 
-            // Try syncing to Supabase if not offline
+            // Try syncing live to Supabase if not offline
             if (!isOfflineMode) {
-                val json = JSONObject().apply {
-                    put("id", eventEntity.id)
-                    put("business_id", businessId)
-                    put("employee_id", employeeId)
-                    put("event_type", eventType.name)
-                    put("timestamp", now)
-                    put("formatted_time", eventEntity.formattedTime)
-                    put("date_str", todayStr)
-                    put("latitude", userLat)
-                    put("longitude", userLng)
-                    put("is_geofence_valid", isInsideGeofence)
-                    put("status", status)
+                try {
+                    SupabaseClient.recordPunchInSupabase(businessId, employeeId, eventEntity)
+                } catch (e: Exception) {
+                    Log.e("DukaanRepository", "Failed to sync punch live to Supabase", e)
                 }
-                SupabaseClient.syncAttendanceToRemote(json)
             }
 
             Result.success(eventEntity.toModel())
@@ -525,20 +540,7 @@ class DukaanRepository(context: Context) {
         val pending = dao.getPendingSyncAttendance()
         var syncedCount = 0
         for (item in pending) {
-            val json = JSONObject().apply {
-                put("id", item.id)
-                put("business_id", item.businessId)
-                put("employee_id", item.employeeId)
-                put("event_type", item.eventType)
-                put("timestamp", item.timestamp)
-                put("formatted_time", item.formattedTime)
-                put("date_str", item.dateStr)
-                put("latitude", item.latitude)
-                put("longitude", item.longitude)
-                put("is_geofence_valid", item.isGeofenceValid)
-                put("status", item.status)
-            }
-            val res = SupabaseClient.syncAttendanceToRemote(json)
+            val res = SupabaseClient.recordPunchInSupabase(item.businessId, item.employeeId, item)
             if (res.isSuccess) {
                 dao.updateAttendanceEvent(item.copy(syncStatus = "SYNCED", isOffline = false))
                 syncedCount++
