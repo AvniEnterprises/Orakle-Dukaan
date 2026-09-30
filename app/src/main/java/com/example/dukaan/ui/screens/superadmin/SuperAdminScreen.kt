@@ -68,6 +68,14 @@ fun SuperAdminScreen(
         matchesType && matchesStatus
     }
 
+    var isSyncing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        isSyncing = true
+        repository.syncBusinessesFromSupabase()
+        isSyncing = false
+    }
+
     Scaffold(
         floatingActionButton = {
             if (selectedTab == 0) {
@@ -84,16 +92,56 @@ fun SuperAdminScreen(
             TopAppBar(
                 title = {
                     Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Superadmin Control Center",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = "LIVE CLOUD",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF059669),
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         Text(
-                            text = "Superadmin Control Center",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Orakle Platform Owner • All-Tenant Access",
+                            text = "Orakle Platform Owner • Supabase Live Sync",
                             style = MaterialTheme.typography.bodySmall,
                             color = OrakleSlate500
                         )
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                isSyncing = true
+                                val res = repository.syncBusinessesFromSupabase()
+                                isSyncing = false
+                                if (res.isSuccess) {
+                                    Toast.makeText(context, "Synced ${res.getOrDefault(0)} live shops from Supabase", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Live sync failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = OrakleRedPrimary
+                            )
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = "Sync from Supabase")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)

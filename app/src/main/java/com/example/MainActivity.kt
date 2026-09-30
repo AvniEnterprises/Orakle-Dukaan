@@ -49,10 +49,11 @@ class MainActivity : ComponentActivity() {
                 val repository = remember { DukaanRepository(applicationContext) }
                 val coroutineScope = rememberCoroutineScope()
 
-                // Clean any leftover demo data on startup
+                // Clean any leftover demo data and sync live cloud businesses on startup
                 LaunchedEffect(Unit) {
                     coroutineScope.launch {
                         repository.cleanDemoDataIfPresent()
+                        repository.syncBusinessesFromSupabase()
                     }
                 }
 

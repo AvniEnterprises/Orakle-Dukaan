@@ -63,13 +63,11 @@ class DukaanRepository(context: Context) {
     suspend fun registerBusiness(business: Business): Business = withContext(Dispatchers.IO) {
         dao.insertBusiness(business.toEntity())
         if (business.email.isNotBlank()) {
-            SupabaseClient.createOrUpdateSupabaseUser(
-                email = business.email,
-                pass = "Password123!",
-                role = UserRole.BUSINESS_ADMIN,
-                name = business.ownerName,
-                businessId = business.id
-            )
+            try {
+                SupabaseClient.registerShopInSupabase(business.toEntity(), "Password123!")
+            } catch (e: Exception) {
+                Log.e("DukaanRepository", "Failed to sync onboarded business to Supabase", e)
+            }
         }
         dao.insertAuditLog(
             AuditLogEntity(
@@ -155,6 +153,18 @@ class DukaanRepository(context: Context) {
         )
         dao.insertBusiness(entity)
 
+        // Live Cloud Registration to Supabase
+        try {
+            val supResult = SupabaseClient.registerShopInSupabase(entity, password)
+            if (supResult.isSuccess) {
+                Log.i("DukaanRepository", "Live registered shop in Supabase: ${entity.name}")
+            } else {
+                Log.w("DukaanRepository", "Supabase live shop registration returned error: ${supResult.exceptionOrNull()?.message}")
+            }
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Failed to sync shop registration to Supabase", e)
+        }
+
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -169,6 +179,30 @@ class DukaanRepository(context: Context) {
         entity.toModel()
     }
 
+    /**
+     * Synchronizes all registered businesses live from Supabase into the local database.
+     * Enables Superadmins and users across devices to see up-to-date registered shops immediately.
+     */
+    suspend fun syncBusinessesFromSupabase(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val result = SupabaseClient.fetchAllShopsFromSupabase()
+            if (result.isSuccess) {
+                val remoteShops = result.getOrNull().orEmpty()
+                for (shop in remoteShops) {
+                    dao.insertBusiness(shop)
+                }
+                Log.i("DukaanRepository", "Synced ${remoteShops.size} shops live from Supabase")
+                Result.success(remoteShops.size)
+            } else {
+                Log.w("DukaanRepository", "Failed to fetch shops from Supabase: ${result.exceptionOrNull()?.message}")
+                Result.failure(result.exceptionOrNull() ?: Exception("Unknown error"))
+            }
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Error syncing businesses from Supabase", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateBusinessStatus(
         businessId: String,
         status: BusinessStatus,
@@ -177,6 +211,13 @@ class DukaanRepository(context: Context) {
         val existing = dao.getBusinessById(businessId) ?: return@withContext
         val updated = existing.copy(status = status.name)
         dao.updateBusiness(updated)
+
+        // Sync live status to Supabase
+        try {
+            SupabaseClient.updateShopStatusInSupabase(businessId, status.name)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Error syncing status to Supabase", e)
+        }
 
         dao.insertAuditLog(
             AuditLogEntity(
@@ -207,6 +248,13 @@ class DukaanRepository(context: Context) {
         )
         dao.updateBusiness(updated)
 
+        // Sync live plan config to Supabase
+        try {
+            SupabaseClient.updateShopPlanInSupabase(businessId, plan, monthlyPrice, employeeLimit, dailyEventLimit)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Error syncing plan to Supabase", e)
+        }
+
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -235,6 +283,14 @@ class DukaanRepository(context: Context) {
 
     suspend fun deleteBusiness(businessId: String, performedBy: String = "Superadmin") = withContext(Dispatchers.IO) {
         dao.deleteBusinessById(businessId)
+
+        // Delete from Supabase
+        try {
+            SupabaseClient.deleteShopFromSupabase(businessId)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Error deleting shop from Supabase", e)
+        }
+
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),

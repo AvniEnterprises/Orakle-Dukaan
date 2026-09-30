@@ -129,7 +129,12 @@ fun LoginScreen(
                             }
 
                             // 2. SHOP ADMIN AUTHENTICATION (Real Database Check & Approval Gate)
-                            val biz = repository.getBusinessByContact(input)
+                            var biz = repository.getBusinessByContact(input)
+                            if (biz == null) {
+                                // Sync live from Supabase in case the shop was registered from another device
+                                repository.syncBusinessesFromSupabase()
+                                biz = repository.getBusinessByContact(input)
+                            }
                             if (biz != null) {
                                 if (biz.password.isNotBlank() && biz.password != pass) {
                                     isLoading = false
