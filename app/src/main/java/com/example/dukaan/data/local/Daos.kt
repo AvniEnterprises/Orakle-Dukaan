@@ -9,6 +9,9 @@ interface DukaanDao {
     @Query("SELECT * FROM businesses ORDER BY createdAt DESC")
     fun getAllBusinesses(): Flow<List<BusinessEntity>>
 
+    @Query("SELECT * FROM businesses")
+    suspend fun getAllBusinessesList(): List<BusinessEntity>
+
     @Query("SELECT * FROM businesses WHERE id = :id")
     suspend fun getBusinessById(id: String): BusinessEntity?
 
@@ -25,8 +28,17 @@ interface DukaanDao {
     suspend fun deleteBusinessById(id: String)
 
     // Employees
+    @Query("SELECT * FROM employees ORDER BY fullName ASC")
+    fun getAllEmployees(): Flow<List<EmployeeEntity>>
+
+    @Query("SELECT * FROM employees")
+    suspend fun getAllEmployeesList(): List<EmployeeEntity>
+
     @Query("SELECT * FROM employees WHERE businessId = :businessId ORDER BY fullName ASC")
     fun getEmployeesForBusiness(businessId: String): Flow<List<EmployeeEntity>>
+
+    @Query("SELECT * FROM employees WHERE businessId = :businessId")
+    suspend fun getEmployeesForBusinessList(businessId: String): List<EmployeeEntity>
 
     @Query("SELECT * FROM employees WHERE id = :id")
     suspend fun getEmployeeById(id: String): EmployeeEntity?
@@ -45,6 +57,12 @@ interface DukaanDao {
 
     @Query("DELETE FROM employees WHERE id = :id")
     suspend fun deleteEmployeeById(id: String)
+
+    @Query("DELETE FROM employees WHERE businessId = :businessId")
+    suspend fun deleteEmployeesByBusinessId(businessId: String)
+
+    @Query("DELETE FROM attendance_events WHERE businessId = :businessId")
+    suspend fun deleteAttendanceByBusinessId(businessId: String)
 
     // Attendance
     @Query("SELECT * FROM attendance_events WHERE businessId = :businessId ORDER BY timestamp DESC")
@@ -81,6 +99,12 @@ interface DukaanDao {
     @Query("DELETE FROM leave_requests WHERE id = :id")
     suspend fun deleteLeaveById(id: String)
 
+    @Query("DELETE FROM leave_requests WHERE businessId = :businessId")
+    suspend fun deleteLeavesByBusinessId(businessId: String)
+
+    @Query("SELECT * FROM leave_requests WHERE id = :id")
+    suspend fun getLeaveById(id: String): LeaveRequestEntity?
+
     // Advances / Udhaar
     @Query("SELECT * FROM advances_udhaar WHERE businessId = :businessId ORDER BY createdAt DESC")
     fun getAdvancesForBusiness(businessId: String): Flow<List<AdvanceUdhaarEntity>>
@@ -91,6 +115,9 @@ interface DukaanDao {
     @Query("SELECT * FROM advances_udhaar WHERE employeeId = :employeeId AND status = 'ACTIVE' LIMIT 1")
     suspend fun getActiveAdvanceForEmployee(employeeId: String): AdvanceUdhaarEntity?
 
+    @Query("SELECT * FROM advances_udhaar WHERE id = :id")
+    suspend fun getAdvanceById(id: String): AdvanceUdhaarEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAdvance(advance: AdvanceUdhaarEntity)
 
@@ -100,12 +127,18 @@ interface DukaanDao {
     @Query("DELETE FROM advances_udhaar WHERE id = :id")
     suspend fun deleteAdvanceById(id: String)
 
+    @Query("DELETE FROM advances_udhaar WHERE businessId = :businessId")
+    suspend fun deleteAdvancesByBusinessId(businessId: String)
+
     // Expenses
     @Query("SELECT * FROM expenses WHERE businessId = :businessId ORDER BY createdAt DESC")
     fun getExpensesForBusiness(businessId: String): Flow<List<ExpenseRecordEntity>>
 
     @Query("SELECT * FROM expenses WHERE employeeId = :employeeId ORDER BY createdAt DESC")
     fun getExpensesForEmployee(employeeId: String): Flow<List<ExpenseRecordEntity>>
+
+    @Query("SELECT * FROM expenses WHERE id = :id")
+    suspend fun getExpenseById(id: String): ExpenseRecordEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExpense(expense: ExpenseRecordEntity)
@@ -115,6 +148,9 @@ interface DukaanDao {
 
     @Query("DELETE FROM expenses WHERE id = :id")
     suspend fun deleteExpenseById(id: String)
+
+    @Query("DELETE FROM expenses WHERE businessId = :businessId")
+    suspend fun deleteExpensesByBusinessId(businessId: String)
 
     // Documents
     @Query("SELECT * FROM documents WHERE businessId = :businessId ORDER BY uploadDate DESC")

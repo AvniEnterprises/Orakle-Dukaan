@@ -182,15 +182,34 @@ class DukaanRepository(context: Context) {
     /**
      * Synchronizes all registered businesses live from Supabase into the local database.
      * Enables Superadmins and users across devices to see up-to-date registered shops immediately.
+     * Prunes any deleted shops and their staff so removed shops disappear instantly across all devices.
      */
     suspend fun syncBusinessesFromSupabase(): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val result = SupabaseClient.fetchAllShopsFromSupabase()
             if (result.isSuccess) {
                 val remoteShops = result.getOrNull().orEmpty()
+                val remoteShopIds = remoteShops.map { it.id }.toSet()
+                val remoteShopCodes = remoteShops.map { it.businessCode }.toSet()
+
                 for (shop in remoteShops) {
                     dao.insertBusiness(shop)
                 }
+
+                // Prune local shops and their cascading data that no longer exist in Supabase
+                val localShops = dao.getAllBusinessesList()
+                for (local in localShops) {
+                    if (!remoteShopIds.contains(local.id) && !remoteShopCodes.contains(local.businessCode)) {
+                        dao.deleteBusinessById(local.id)
+                        dao.deleteEmployeesByBusinessId(local.id)
+                        dao.deleteAttendanceByBusinessId(local.id)
+                        dao.deleteLeavesByBusinessId(local.id)
+                        dao.deleteAdvancesByBusinessId(local.id)
+                        dao.deleteExpensesByBusinessId(local.id)
+                        Log.i("DukaanRepository", "Pruned deleted shop from local database: ${local.id} (${local.name})")
+                    }
+                }
+
                 Log.i("DukaanRepository", "Synced ${remoteShops.size} shops live from Supabase")
                 Result.success(remoteShops.size)
             } else {
@@ -269,6 +288,11 @@ class DukaanRepository(context: Context) {
 
     suspend fun updateBusiness(business: Business, performedBy: String = "Admin") = withContext(Dispatchers.IO) {
         dao.updateBusiness(business.toEntity())
+        try {
+            SupabaseClient.updateShopInSupabase(business.toEntity())
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Failed to sync updated business to Supabase", e)
+        }
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -282,13 +306,19 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun deleteBusiness(businessId: String, performedBy: String = "Superadmin") = withContext(Dispatchers.IO) {
+        // Cascade delete from local Room: Business + Staff + Punches + Leaves + Advances + Expenses
         dao.deleteBusinessById(businessId)
+        dao.deleteEmployeesByBusinessId(businessId)
+        dao.deleteAttendanceByBusinessId(businessId)
+        dao.deleteLeavesByBusinessId(businessId)
+        dao.deleteAdvancesByBusinessId(businessId)
+        dao.deleteExpensesByBusinessId(businessId)
 
-        // Delete from Supabase
+        // Cascade delete from Supabase: Shop User + All Employee Users
         try {
-            SupabaseClient.deleteShopFromSupabase(businessId)
+            SupabaseClient.deleteShopAndEmployeesFromSupabase(businessId)
         } catch (e: Exception) {
-            Log.e("DukaanRepository", "Error deleting shop from Supabase", e)
+            Log.e("DukaanRepository", "Error deleting shop and staff from Supabase", e)
         }
 
         dao.insertAuditLog(
@@ -297,13 +327,19 @@ class DukaanRepository(context: Context) {
                 businessId = businessId,
                 action = "BUSINESS_DELETED",
                 performedBy = performedBy,
-                details = "Deleted business $businessId",
+                details = "Deleted business $businessId and all staff accounts",
                 timestamp = System.currentTimeMillis()
             )
         )
     }
 
     // --- Employees Flow & Actions ---
+    fun getAllEmployees(): Flow<List<Employee>> {
+        return dao.getAllEmployees().map { list ->
+            list.map { it.toModel() }
+        }
+    }
+
     fun getEmployeesForBusiness(businessId: String): Flow<List<Employee>> {
         return dao.getEmployeesForBusiness(businessId).map { list ->
             list.map { it.toModel() }
@@ -344,13 +380,25 @@ class DukaanRepository(context: Context) {
 
     suspend fun syncEmployeesAndAttendanceFromSupabase(businessId: String) = withContext(Dispatchers.IO) {
         try {
-            val empResult = SupabaseClient.fetchAllEmployeesFromSupabase(businessId)
-            if (empResult.isSuccess) {
-                empResult.getOrNull()?.forEach { dao.insertEmployee(it) }
-            }
-            val punchResult = SupabaseClient.fetchPunchesForBusiness(businessId)
-            if (punchResult.isSuccess) {
-                punchResult.getOrNull()?.forEach { dao.insertAttendanceEvent(it) }
+            val result = SupabaseClient.fetchFullShopDataFromSupabase(businessId)
+            if (result.isSuccess) {
+                val data = result.getOrNull()
+                if (data != null) {
+                    val remoteEmpIds = data.employees.map { it.id }.toSet()
+                    for (emp in data.employees) { dao.insertEmployee(emp) }
+                    for (p in data.punches) { dao.insertAttendanceEvent(p) }
+                    for (l in data.leaves) { dao.insertLeave(l) }
+                    for (e in data.expenses) { dao.insertExpense(e) }
+                    for (a in data.advances) { dao.insertAdvance(a) }
+
+                    // Prune local staff for this shop if deleted in Supabase
+                    val localEmps = dao.getEmployeesForBusinessList(businessId)
+                    for (localEmp in localEmps) {
+                        if (!remoteEmpIds.contains(localEmp.id)) {
+                            dao.deleteEmployeeById(localEmp.id)
+                        }
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e("DukaanRepository", "syncEmployeesAndAttendanceFromSupabase failed", e)
@@ -361,7 +409,17 @@ class DukaanRepository(context: Context) {
         try {
             val empResult = SupabaseClient.fetchAllEmployeesFromSupabase(null)
             if (empResult.isSuccess) {
-                empResult.getOrNull()?.forEach { dao.insertEmployee(it) }
+                val list = empResult.getOrNull() ?: emptyList()
+                val remoteEmpIds = list.map { it.id }.toSet()
+                for (emp in list) {
+                    dao.insertEmployee(emp)
+                }
+                val localEmps = dao.getAllEmployeesList()
+                for (localEmp in localEmps) {
+                    if (!remoteEmpIds.contains(localEmp.id)) {
+                        dao.deleteEmployeeById(localEmp.id)
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e("DukaanRepository", "syncAllEmployeesFromSupabase failed", e)
@@ -370,6 +428,11 @@ class DukaanRepository(context: Context) {
 
     suspend fun deleteEmployee(employeeId: String, businessId: String) = withContext(Dispatchers.IO) {
         dao.deleteEmployeeById(employeeId)
+        try {
+            SupabaseClient.deleteEmployeeFromSupabase(employeeId, businessId)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Failed to delete employee from Supabase", e)
+        }
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -399,6 +462,12 @@ class DukaanRepository(context: Context) {
             bankIfsc = bankIfsc
         )
         dao.updateEmployee(updated)
+        try {
+            val pass = if (updated.password.isNotBlank()) updated.password else "Password123!"
+            SupabaseClient.registerEmployeeInSupabase(updated, pass)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Failed to sync employee profile update to Supabase", e)
+        }
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -567,11 +636,23 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun applyLeave(leave: LeaveRequest) = withContext(Dispatchers.IO) {
-        dao.insertLeave(leave.toEntity())
+        val entity = leave.toEntity()
+        dao.insertLeave(entity)
+        try {
+            SupabaseClient.recordLeaveInSupabase(entity)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "applyLeave sync failed", e)
+        }
     }
 
     suspend fun updateLeave(leave: LeaveRequest) = withContext(Dispatchers.IO) {
-        dao.updateLeave(leave.toEntity())
+        val entity = leave.toEntity()
+        dao.updateLeave(entity)
+        try {
+            SupabaseClient.recordLeaveInSupabase(entity)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "updateLeave sync failed", e)
+        }
     }
 
     suspend fun deleteLeave(leaveId: String) = withContext(Dispatchers.IO) {
@@ -579,10 +660,15 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun updateLeaveStatus(leaveId: String, status: LeaveStatus, comment: String) = withContext(Dispatchers.IO) {
-        val list = dao.getLeavesForBusiness("").firstOrNull() ?: emptyList()
-        val found = list.find { it.id == leaveId }
+        val found = dao.getLeaveById(leaveId)
         if (found != null) {
-            dao.updateLeave(found.copy(status = status.name, adminComment = comment))
+            val updated = found.copy(status = status.name, adminComment = comment)
+            dao.updateLeave(updated)
+            try {
+                SupabaseClient.recordLeaveInSupabase(updated)
+            } catch (e: Exception) {
+                Log.e("DukaanRepository", "updateLeaveStatus sync failed", e)
+            }
         }
     }
 
@@ -596,7 +682,13 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun saveAdvance(advance: AdvanceUdhaar) = withContext(Dispatchers.IO) {
-        dao.insertAdvance(advance.toEntity())
+        val entity = advance.toEntity()
+        dao.insertAdvance(entity)
+        try {
+            SupabaseClient.recordAdvanceInSupabase(entity)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "saveAdvance sync failed", e)
+        }
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -610,7 +702,13 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun updateAdvance(advance: AdvanceUdhaar) = withContext(Dispatchers.IO) {
-        dao.updateAdvance(advance.toEntity())
+        val entity = advance.toEntity()
+        dao.updateAdvance(entity)
+        try {
+            SupabaseClient.recordAdvanceInSupabase(entity)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "updateAdvance sync failed", e)
+        }
     }
 
     suspend fun deleteAdvance(advanceId: String) = withContext(Dispatchers.IO) {
@@ -618,10 +716,15 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun updateAdvanceStatus(advanceId: String, newStatus: String) = withContext(Dispatchers.IO) {
-        val advances = dao.getAdvancesForBusiness("").firstOrNull() ?: emptyList()
-        val found = advances.find { it.id == advanceId }
+        val found = dao.getAdvanceById(advanceId)
         if (found != null) {
-            dao.updateAdvance(found.copy(status = newStatus))
+            val updated = found.copy(status = newStatus)
+            dao.updateAdvance(updated)
+            try {
+                SupabaseClient.recordAdvanceInSupabase(updated)
+            } catch (e: Exception) {
+                Log.e("DukaanRepository", "updateAdvanceStatus sync failed", e)
+            }
         }
     }
 
@@ -635,11 +738,23 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun submitExpense(expense: ExpenseRecord) = withContext(Dispatchers.IO) {
-        dao.insertExpense(expense.toEntity())
+        val entity = expense.toEntity()
+        dao.insertExpense(entity)
+        try {
+            SupabaseClient.recordExpenseInSupabase(entity)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "submitExpense sync failed", e)
+        }
     }
 
     suspend fun updateExpense(expense: ExpenseRecord) = withContext(Dispatchers.IO) {
-        dao.updateExpense(expense.toEntity())
+        val entity = expense.toEntity()
+        dao.updateExpense(entity)
+        try {
+            SupabaseClient.recordExpenseInSupabase(entity)
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "updateExpense sync failed", e)
+        }
     }
 
     suspend fun deleteExpense(expenseId: String) = withContext(Dispatchers.IO) {
@@ -647,10 +762,15 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun updateExpenseStatus(expenseId: String, status: ExpenseStatus) = withContext(Dispatchers.IO) {
-        val list = dao.getExpensesForBusiness("").firstOrNull() ?: emptyList()
-        val found = list.find { it.id == expenseId }
+        val found = dao.getExpenseById(expenseId)
         if (found != null) {
-            dao.updateExpense(found.copy(status = status.name))
+            val updated = found.copy(status = status.name)
+            dao.updateExpense(updated)
+            try {
+                SupabaseClient.recordExpenseInSupabase(updated)
+            } catch (e: Exception) {
+                Log.e("DukaanRepository", "updateExpenseStatus sync failed", e)
+            }
         }
     }
 
@@ -851,7 +971,7 @@ fun BusinessEntity.toModel() = Business(
     monthlyPrice = monthlyPrice,
     employeeLimit = employeeLimit,
     dailyEventLimitPerEmployee = dailyEventLimitPerEmployee,
-    status = BusinessStatus.valueOf(status),
+    status = BusinessStatus.values().firstOrNull { it.name.equals(status, ignoreCase = true) } ?: BusinessStatus.PENDING,
     shiftStart = shiftStart,
     shiftEnd = shiftEnd,
     graceMinutes = graceMinutes,
@@ -903,7 +1023,7 @@ fun EmployeeEntity.toModel() = Employee(
     address = address,
     designation = designation,
     joiningDate = joiningDate,
-    salaryType = SalaryType.valueOf(salaryType),
+    salaryType = SalaryType.values().firstOrNull { it.name.equals(salaryType, ignoreCase = true) } ?: SalaryType.MONTHLY,
     monthlySalary = monthlySalary,
     dailyWage = dailyWage,
     customDailyRate = customDailyRate,
@@ -939,7 +1059,7 @@ fun AttendanceEventEntity.toModel() = AttendanceEvent(
     id = id,
     businessId = businessId,
     employeeId = employeeId,
-    eventType = AttendanceType.valueOf(eventType),
+    eventType = AttendanceType.values().firstOrNull { it.name.equals(eventType, ignoreCase = true) } ?: AttendanceType.IN,
     timestamp = timestamp,
     formattedTime = formattedTime,
     dateStr = dateStr,
@@ -963,7 +1083,7 @@ fun LeaveRequestEntity.toModel() = LeaveRequest(
     endDate = endDate,
     days = days,
     reason = reason,
-    status = LeaveStatus.valueOf(status),
+    status = LeaveStatus.values().firstOrNull { it.name.equals(status, ignoreCase = true) } ?: LeaveStatus.PENDING,
     adminComment = adminComment,
     createdAt = createdAt
 )
@@ -1017,7 +1137,7 @@ fun ExpenseRecordEntity.toModel() = ExpenseRecord(
     description = description,
     date = date,
     receiptUri = receiptUri,
-    status = ExpenseStatus.valueOf(status),
+    status = ExpenseStatus.values().firstOrNull { it.name.equals(status, ignoreCase = true) } ?: ExpenseStatus.PENDING,
     createdAt = createdAt
 )
 

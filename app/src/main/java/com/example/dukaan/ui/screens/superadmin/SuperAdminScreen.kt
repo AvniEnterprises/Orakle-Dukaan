@@ -38,6 +38,7 @@ fun SuperAdminScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val businesses by repository.getAllBusinesses().collectAsState(initial = emptyList())
+    val allEmployees by repository.getAllEmployees().collectAsState(initial = emptyList())
     val agents by repository.getAllAgents().collectAsState(initial = emptyList())
     val commissions by repository.getAllCommissions().collectAsState(initial = emptyList())
 
@@ -70,10 +71,15 @@ fun SuperAdminScreen(
 
     var isSyncing by remember { mutableStateOf(false) }
 
+    // Instant Live Auto-Refresh polling loop (Every 2.5 seconds in foreground)
     LaunchedEffect(Unit) {
-        isSyncing = true
-        repository.syncBusinessesFromSupabase()
-        isSyncing = false
+        while (true) {
+            isSyncing = true
+            repository.syncBusinessesFromSupabase()
+            repository.syncAllEmployeesFromSupabase()
+            isSyncing = false
+            kotlinx.coroutines.delay(2500)
+        }
     }
 
     Scaffold(
@@ -269,8 +275,13 @@ fun SuperAdminScreen(
                         }
 
                         items(filteredBusinesses) { biz ->
+                            val staffCount = allEmployees.count {
+                                it.businessId.equals(biz.id, ignoreCase = true) ||
+                                it.businessId.equals(biz.businessCode, ignoreCase = true)
+                            }
                             BusinessSuperadminCard(
                                 business = biz,
+                                staffCount = staffCount,
                                 onManageClick = { selectedBusinessForControl = biz },
                                 onManageStaffClick = { selectedBusinessForStaff = biz },
                                 onToggleStatus = {
@@ -619,8 +630,10 @@ fun SuperAdminScreen(
             onDelete = {
                 coroutineScope.launch {
                     repository.deleteBusiness(biz.id, "Superadmin")
+                    repository.syncBusinessesFromSupabase()
+                    repository.syncAllEmployeesFromSupabase()
                     selectedBusinessForControl = null
-                    Toast.makeText(context, "Business deleted", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Shop and all staff deleted", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -670,6 +683,7 @@ fun SuperAdminScreen(
 @Composable
 fun BusinessSuperadminCard(
     business: Business,
+    staffCount: Int = 0,
     onManageClick: () -> Unit,
     onManageStaffClick: () -> Unit,
     onToggleStatus: () -> Unit
@@ -732,7 +746,7 @@ fun BusinessSuperadminCard(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "Plan: ${business.plan} (₹${business.monthlyPrice.toInt()}/mo) • Staff Limit: ${business.employeeLimit} • Shift: ${business.shiftStart} - ${business.shiftEnd}",
+                    text = "Staff: $staffCount / ${business.employeeLimit} registered • Plan: ${business.plan} (₹${business.monthlyPrice.toInt()}/mo) • Shift: ${business.shiftStart} - ${business.shiftEnd}",
                     fontSize = 11.sp,
                     color = OrakleSlate500,
                     maxLines = 1,
@@ -958,6 +972,13 @@ fun SuperAdminStaffDialog(
     val employees by repository.getEmployeesForBusiness(business.id).collectAsState(initial = emptyList())
     var selectedEmployeeForEdit by remember { mutableStateOf<Employee?>(null) }
     var showAddEmployeeDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(business.id) {
+        while (true) {
+            repository.syncEmployeesAndAttendanceFromSupabase(business.id)
+            kotlinx.coroutines.delay(2000)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -50,10 +50,16 @@ fun AdminMainScreen(
     var isSyncing by remember { mutableStateOf(false) }
 
     LaunchedEffect(businessId) {
-        business = repository.getBusinessById(businessId)
-        isSyncing = true
-        repository.syncEmployeesAndAttendanceFromSupabase(businessId)
-        isSyncing = false
+        while (true) {
+            isSyncing = true
+            repository.syncEmployeesAndAttendanceFromSupabase(businessId)
+            val updated = repository.getBusinessById(businessId)
+            if (updated != null) {
+                business = updated
+            }
+            isSyncing = false
+            kotlinx.coroutines.delay(2500)
+        }
     }
 
     val employees by repository.getEmployeesForBusiness(businessId).collectAsState(initial = emptyList())
@@ -888,6 +894,11 @@ fun AdminMainScreen(
             onDismiss = { showAddEmployeeDialog = false },
             onSave = { emp ->
                 coroutineScope.launch {
+                    val limit = business?.employeeLimit ?: 5
+                    if (employees.size >= limit) {
+                        Toast.makeText(context, "Employee limit ($limit) reached for ${business?.plan ?: "current"} plan! Contact Superadmin to upgrade quota.", Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
                     repository.saveEmployee(emp, isEdit = false)
                     showAddEmployeeDialog = false
                     Toast.makeText(context, "Added staff: ${emp.fullName}", Toast.LENGTH_SHORT).show()

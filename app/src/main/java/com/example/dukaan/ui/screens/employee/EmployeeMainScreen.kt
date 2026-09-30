@@ -46,10 +46,13 @@ fun EmployeeMainScreen(
     var business by remember { mutableStateOf<Business?>(null) }
 
     LaunchedEffect(employeeId, businessId) {
-        repository.syncBusinessesFromSupabase()
-        repository.syncEmployeesAndAttendanceFromSupabase(businessId)
-        employee = repository.getEmployeeById(employeeId)
-        business = repository.getBusinessById(businessId)
+        while (true) {
+            repository.syncBusinessesFromSupabase()
+            repository.syncEmployeesAndAttendanceFromSupabase(businessId)
+            employee = repository.getEmployeeById(employeeId)
+            business = repository.getBusinessById(businessId)
+            kotlinx.coroutines.delay(2500)
+        }
     }
 
     val attendanceHistory by repository.getAttendanceForEmployee(employeeId).collectAsState(initial = emptyList())
