@@ -1,0 +1,6 @@
+{
+  "name": "Dukaan",
+  "description": "Geo-fenced Attendance & Employee Management SaaS for local businesses",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

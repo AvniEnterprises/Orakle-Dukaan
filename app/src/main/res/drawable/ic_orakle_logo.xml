@@ -1,0 +1,37 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- Orakle Red Ring / Stadium loop -->
+    <path
+        android:fillColor="#E50914"
+        android:fillType="evenOdd"
+        android:pathData="M 60,25 C 78,25 96,33 96,50 C 96,67 78,75 60,75 C 42,75 24,67 24,50 C 24,33 42,25 60,25 Z M 60,37 C 48,37 38,42 38,50 C 38,58 48,63 60,63 C 72,63 82,58 82,50 C 82,42 72,37 60,37 Z" />
+    <!-- ORAKLE Typography -->
+    <!-- O -->
+    <path
+        android:fillColor="#E50914"
+        android:fillType="evenOdd"
+        android:pathData="M 23,85 C 27,85 29,87 29,91 C 29,95 27,97 23,97 C 19,97 17,95 17,91 C 17,87 19,85 23,85 Z M 23,88 C 21,88 20,89 20,91 C 20,93 21,94 23,94 C 25,94 26,93 26,91 C 26,89 25,88 23,88 Z" />
+    <!-- R -->
+    <path
+        android:fillColor="#E50914"
+        android:pathData="M 33,85 L 42,85 C 45,85 46,87 46,89 C 46,91 45,92 43,92 L 46,97 L 43,97 L 40.5,92.5 L 36,92.5 L 36,97 L 33,97 Z M 36,87.5 L 36,90.5 L 41.5,90.5 C 42.5,90.5 43,90 43,89 C 43,88 42.5,87.5 41.5,87.5 Z" />
+    <!-- A -->
+    <path
+        android:fillColor="#E50914"
+        android:pathData="M 54,85 L 58,97 L 55,97 L 54,94 L 49,94 L 48,97 L 45,97 L 49,85 Z M 51.5,88 L 49.8,92 L 53.2,92 Z" />
+    <!-- K -->
+    <path
+        android:fillColor="#E50914"
+        android:pathData="M 62,85 L 65,85 L 65,89.5 L 70,85 L 74,85 L 68,90.5 L 74,97 L 70,97 L 65,91.5 L 65,97 L 62,97 Z" />
+    <!-- L -->
+    <path
+        android:fillColor="#E50914"
+        android:pathData="M 78,85 L 81,85 L 81,94.5 L 88,94.5 L 88,97 L 78,97 Z" />
+    <!-- E -->
+    <path
+        android:fillColor="#E50914"
+        android:pathData="M 92,85 L 102,85 L 102,87.5 L 95,87.5 L 95,89.5 L 101,89.5 L 101,92 L 95,92 L 95,94.5 L 102,94.5 L 102,97 L 92,97 Z" />
+</vector>

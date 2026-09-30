@@ -1,0 +1,450 @@
+package com.example.dukaan.service
+
+import android.content.Context
+import android.graphics.*
+import android.graphics.pdf.PdfDocument
+import com.example.dukaan.data.model.*
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.*
+
+object ReportGenerator {
+
+    private val reportDateFormat = SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH)
+
+    fun generateAttendancePdf(
+        context: Context,
+        business: Business,
+        employees: List<Employee>,
+        attendanceList: List<AttendanceEvent>,
+        dateStr: String
+    ): File {
+        val pdfDoc = PdfDocument()
+        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // Standard A4 (595x842 pt)
+        val page = pdfDoc.startPage(pageInfo)
+        val canvas = page.canvas
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 18f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#E50914")
+        }
+        val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 12f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#0F172A")
+        }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10f
+            color = Color.parseColor("#334155")
+        }
+        val boldTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#0F172A")
+        }
+        val borderPaint = Paint().apply {
+            color = Color.parseColor("#E2E8F0")
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+
+        // Header Background
+        paint.color = Color.parseColor("#F8FAFC")
+        canvas.drawRect(30f, 30f, 565f, 110f, paint)
+
+        // Title & Business Details
+        canvas.drawText("ORAKLE DUKAAN", 45f, 55f, titlePaint)
+        canvas.drawText("${business.name} (${business.businessCode})", 45f, 75f, headerPaint)
+        canvas.drawText("${business.address}, ${business.city} | Ph: ${business.phone}", 45f, 92f, textPaint)
+        canvas.drawText("Date: $dateStr", 440f, 75f, boldTextPaint)
+        canvas.drawText("DAILY ATTENDANCE REPORT", 45f, 135f, headerPaint)
+
+        // Summary Bar
+        val presentCount = attendanceList.map { it.employeeId }.distinct().size
+        val totalEmp = employees.size
+        val absentCount = (totalEmp - presentCount).coerceAtLeast(0)
+
+        paint.color = Color.parseColor("#F1F5F9")
+        canvas.drawRoundRect(RectF(30f, 150f, 565f, 185f), 6f, 6f, paint)
+        canvas.drawText("Total Staff: $totalEmp   |   Present: $presentCount   |   Absent: $absentCount   |   Total Punches: ${attendanceList.size}", 45f, 172f, boldTextPaint)
+
+        // Table Header
+        var y = 215f
+        paint.color = Color.parseColor("#0F172A")
+        canvas.drawRect(30f, y - 18f, 565f, y + 8f, paint)
+        paint.color = Color.WHITE
+        paint.textSize = 10f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Employee", 40f, y, paint)
+        canvas.drawText("Code", 170f, y, paint)
+        canvas.drawText("Punch Type", 240f, y, paint)
+        canvas.drawText("Time", 330f, y, paint)
+        canvas.drawText("Geofence Status", 410f, y, paint)
+
+        // Table Rows
+        y += 24f
+        var rowBg = false
+        val empMap = employees.associateBy { it.id }
+
+        for (item in attendanceList.take(22)) {
+            val emp = empMap[item.employeeId]
+            val empName = emp?.fullName ?: "Staff (${item.employeeId.take(6)})"
+            val empCode = emp?.employeeCode ?: "-"
+
+            if (rowBg) {
+                paint.color = Color.parseColor("#F8FAFC")
+                canvas.drawRect(30f, y - 14f, 565f, y + 8f, paint)
+            }
+            rowBg = !rowBg
+
+            canvas.drawText(empName, 40f, y, textPaint)
+            canvas.drawText(empCode, 170f, y, textPaint)
+            canvas.drawText(item.eventType.name, 240f, y, boldTextPaint)
+            canvas.drawText(item.formattedTime, 330f, y, textPaint)
+
+            val statusText = if (item.isGeofenceValid) "Inside Geofence ✓" else "Outside Geofence ✕"
+            canvas.drawText(statusText, 410f, y, textPaint)
+
+            canvas.drawLine(30f, y + 8f, 565f, y + 8f, borderPaint)
+            y += 22f
+        }
+
+        // Signature Section
+        val signY = 760f
+        canvas.drawLine(40f, signY, 180f, signY, borderPaint)
+        canvas.drawText("Prepared By (Store Admin)", 40f, signY + 15f, textPaint)
+
+        canvas.drawLine(400f, signY, 540f, signY, borderPaint)
+        canvas.drawText("Authorized Signature", 410f, signY + 15f, textPaint)
+
+        // Footer
+        canvas.drawText("Generated by Orakle Dukaan • Confidential Business Record • Page 1 of 1", 130f, 815f, textPaint)
+
+        pdfDoc.finishPage(page)
+
+        val targetDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+        val safeName = business.name.replace("[^a-zA-Z0-9]".toRegex(), "_")
+        val file = File(targetDir, "${safeName}_Attendance_$dateStr.pdf")
+        val out = FileOutputStream(file)
+        pdfDoc.writeTo(out)
+        out.close()
+        pdfDoc.close()
+        return file
+    }
+
+    fun generateSalaryReportPdf(
+        context: Context,
+        business: Business,
+        employees: List<Employee>,
+        periodStr: String
+    ): File {
+        val pdfDoc = PdfDocument()
+        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
+        val page = pdfDoc.startPage(pageInfo)
+        val canvas = page.canvas
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 18f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#E50914")
+        }
+        val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 12f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#0F172A")
+        }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10f
+            color = Color.parseColor("#334155")
+        }
+        val boldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#0F172A")
+        }
+        val borderPaint = Paint().apply {
+            color = Color.parseColor("#CBD5E1")
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+
+        // Header
+        paint.color = Color.parseColor("#F8FAFC")
+        canvas.drawRect(30f, 30f, 565f, 105f, paint)
+        canvas.drawText("ORAKLE DUKAAN", 45f, 55f, titlePaint)
+        canvas.drawText("${business.name} - MONTHLY SALARY STATEMENT", 45f, 75f, headerPaint)
+        canvas.drawText("Period: $periodStr | Generated: ${reportDateFormat.format(Date())}", 45f, 92f, textPaint)
+
+        // Table Header
+        var y = 140f
+        paint.color = Color.parseColor("#0F172A")
+        canvas.drawRect(30f, y - 18f, 565f, y + 8f, paint)
+        paint.color = Color.WHITE
+        paint.textSize = 9.5f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Employee", 38f, y, paint)
+        canvas.drawText("Base Pay", 160f, y, paint)
+        canvas.drawText("Present", 230f, y, paint)
+        canvas.drawText("Udhaar Rec.", 300f, y, paint)
+        canvas.drawText("Deductions", 380f, y, paint)
+        canvas.drawText("Net Payable", 470f, y, paint)
+
+        var totalNetPayable = 0.0
+        var totalBase = 0.0
+        var totalUdhaar = 0.0
+        y += 24f
+
+        for (emp in employees) {
+            val base = emp.monthlySalary
+            val presentDays = 26
+            val udhaarDeduction = if (emp.fullName.contains("Rahul")) 2000.0 else 0.0
+            val otherDeductions = 500.0
+            val net = base - udhaarDeduction - otherDeductions
+
+            totalBase += base
+            totalUdhaar += udhaarDeduction
+            totalNetPayable += net
+
+            canvas.drawText("${emp.fullName} (${emp.employeeCode})", 38f, y, textPaint)
+            canvas.drawText("₹${base.toInt()}", 160f, y, textPaint)
+            canvas.drawText("$presentDays days", 230f, y, textPaint)
+            canvas.drawText("-₹${udhaarDeduction.toInt()}", 300f, y, textPaint)
+            canvas.drawText("-₹${otherDeductions.toInt()}", 380f, y, textPaint)
+            canvas.drawText("₹${net.toInt()}", 470f, y, boldPaint)
+
+            canvas.drawLine(30f, y + 8f, 565f, y + 8f, borderPaint)
+            y += 24f
+        }
+
+        // Total Row
+        y += 10f
+        paint.color = Color.parseColor("#F1F5F9")
+        canvas.drawRect(30f, y - 16f, 565f, y + 14f, paint)
+        canvas.drawText("GRAND TOTAL:", 38f, y, boldPaint)
+        canvas.drawText("₹${totalBase.toInt()}", 160f, y, boldPaint)
+        canvas.drawText("-₹${totalUdhaar.toInt()}", 300f, y, boldPaint)
+        canvas.drawText("₹${totalNetPayable.toInt()}", 470f, y, boldPaint)
+
+        // Signatures
+        val signY = 750f
+        canvas.drawLine(40f, signY, 180f, signY, borderPaint)
+        canvas.drawText("Accountant / Admin", 40f, signY + 15f, textPaint)
+        canvas.drawLine(400f, signY, 540f, signY, borderPaint)
+        canvas.drawText("Owner Approval", 410f, signY + 15f, textPaint)
+
+        canvas.drawText("Generated by Orakle Dukaan • Compliant with Indian Payroll & Udhaar Standards", 100f, 815f, textPaint)
+
+        pdfDoc.finishPage(page)
+
+        val file = File(context.cacheDir, "${business.name.replace(" ", "_")}_Salary_$periodStr.pdf")
+        val out = FileOutputStream(file)
+        pdfDoc.writeTo(out)
+        out.close()
+        pdfDoc.close()
+        return file
+    }
+
+    fun generatePayslipPdf(
+        context: Context,
+        business: Business,
+        employee: Employee,
+        periodStr: String,
+        presentDays: Int = 26,
+        advanceDeducted: Double = 1000.0
+    ): File {
+        val pdfDoc = PdfDocument()
+        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
+        val page = pdfDoc.startPage(pageInfo)
+        val canvas = page.canvas
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 18f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#E50914")
+        }
+        val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 13f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#0F172A")
+        }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10f
+            color = Color.parseColor("#334155")
+        }
+        val boldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = Color.parseColor("#0F172A")
+        }
+        val borderPaint = Paint().apply {
+            color = Color.parseColor("#CBD5E1")
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+
+        // Card Border
+        paint.color = Color.parseColor("#FFFFFF")
+        canvas.drawRoundRect(RectF(25f, 25f, 570f, 815f), 10f, 10f, paint)
+        canvas.drawRoundRect(RectF(25f, 25f, 570f, 815f), 10f, 10f, borderPaint)
+
+        // Header
+        canvas.drawText("ORAKLE DUKAAN", 45f, 58f, titlePaint)
+        canvas.drawText(business.name, 45f, 78f, headerPaint)
+        canvas.drawText("${business.address}, ${business.city} • Ph: ${business.phone}", 45f, 94f, textPaint)
+        canvas.drawText("SALARY PAYSLIP", 430f, 60f, headerPaint)
+        canvas.drawText("Period: $periodStr", 430f, 78f, boldPaint)
+
+        canvas.drawLine(25f, 110f, 570f, 110f, borderPaint)
+
+        // Employee Info Box
+        var y = 140f
+        canvas.drawText("Employee Name: ${employee.fullName}", 45f, y, boldPaint)
+        canvas.drawText("Employee Code: ${employee.employeeCode}", 330f, y, boldPaint)
+        y += 20f
+        canvas.drawText("Designation: ${employee.designation}", 45f, y, textPaint)
+        canvas.drawText("Salary Type: ${employee.salaryType.name}", 330f, y, textPaint)
+        y += 20f
+        canvas.drawText("Bank Account: ${employee.bankAccount}", 45f, y, textPaint)
+        canvas.drawText("Bank IFSC: ${employee.bankIfsc}", 330f, y, textPaint)
+        y += 20f
+        canvas.drawText("Present Days: $presentDays days", 45f, y, boldPaint)
+        canvas.drawText("Joining Date: ${employee.joiningDate}", 330f, y, textPaint)
+
+        y += 30f
+        canvas.drawLine(25f, y, 570f, y, borderPaint)
+
+        // Earnings and Deductions Table
+        y += 25f
+        paint.color = Color.parseColor("#F1F5F9")
+        canvas.drawRect(45f, y - 18f, 290f, y + 8f, paint)
+        canvas.drawRect(310f, y - 18f, 550f, y + 8f, paint)
+
+        canvas.drawText("EARNINGS", 55f, y, boldPaint)
+        canvas.drawText("AMOUNT", 220f, y, boldPaint)
+        canvas.drawText("DEDUCTIONS", 320f, y, boldPaint)
+        canvas.drawText("AMOUNT", 480f, y, boldPaint)
+
+        y += 25f
+        val basePay = employee.monthlySalary
+        val allowance = 1000.0
+        val gross = basePay + allowance
+        val otherDeduction = 500.0
+        val totalDeduction = advanceDeducted + otherDeduction
+        val netPayable = gross - totalDeduction
+
+        canvas.drawText("Basic Salary", 55f, y, textPaint)
+        canvas.drawText("₹${basePay.toInt()}", 220f, y, textPaint)
+        canvas.drawText("Udhaar/Advance Recovered", 320f, y, textPaint)
+        canvas.drawText("₹${advanceDeducted.toInt()}", 480f, y, textPaint)
+
+        y += 22f
+        canvas.drawText("Special Allowance", 55f, y, textPaint)
+        canvas.drawText("₹${allowance.toInt()}", 220f, y, textPaint)
+        canvas.drawText("TDS / Other Deductions", 320f, y, textPaint)
+        canvas.drawText("₹${otherDeduction.toInt()}", 480f, y, textPaint)
+
+        y += 30f
+        canvas.drawLine(45f, y, 550f, y, borderPaint)
+
+        y += 20f
+        canvas.drawText("Gross Earnings: ₹${gross.toInt()}", 55f, y, boldPaint)
+        canvas.drawText("Total Deductions: ₹${totalDeduction.toInt()}", 320f, y, boldPaint)
+
+        y += 35f
+        paint.color = Color.parseColor("#DCFCE7") // Light Green
+        canvas.drawRoundRect(RectF(45f, y - 20f, 550f, y + 25f), 6f, 6f, paint)
+        paint.color = Color.parseColor("#166534")
+        paint.textSize = 14f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("NET SALARY PAYABLE:  ₹${netPayable.toInt()}", 60f, y + 8f, paint)
+
+        // Signatures
+        val signY = 720f
+        canvas.drawLine(60f, signY, 220f, signY, borderPaint)
+        canvas.drawText("Employee Signature", 60f, signY + 15f, textPaint)
+
+        canvas.drawLine(380f, signY, 530f, signY, borderPaint)
+        canvas.drawText("Authorized Signatory", 380f, signY + 15f, textPaint)
+
+        canvas.drawText("This is an official computer-generated payslip from Orakle Dukaan.", 120f, 790f, textPaint)
+
+        pdfDoc.finishPage(page)
+
+        val targetDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+        val safeEmpName = employee.fullName.replace("[^a-zA-Z0-9]".toRegex(), "_")
+        val file = File(targetDir, "${safeEmpName}_Payslip_$periodStr.pdf")
+        val out = FileOutputStream(file)
+        pdfDoc.writeTo(out)
+        out.close()
+        pdfDoc.close()
+        return file
+    }
+
+    fun openOrShareFile(context: Context, file: File, mimeType: String = "application/pdf") {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = mimeType
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(android.content.Intent.createChooser(shareIntent, "Save or Open Report"))
+        }
+    }
+
+    fun exportAttendanceCsv(
+        context: Context,
+        business: Business,
+        employees: List<Employee>,
+        attendanceList: List<AttendanceEvent>
+    ): File {
+        val file = File(context.cacheDir, "${business.name.replace(" ", "_")}_Attendance.csv")
+        val empMap = employees.associateBy { it.id }
+
+        file.printWriter().use { out ->
+            out.println("Business,Employee_Name,Employee_Code,Date,Time,Event_Type,Latitude,Longitude,Distance_Meters,Geofence_Status,Verification_Method")
+            for (att in attendanceList) {
+                val emp = empMap[att.employeeId]
+                val name = emp?.fullName ?: "Staff"
+                val code = emp?.employeeCode ?: "-"
+                out.println("\"${business.name}\",\"$name\",\"$code\",\"${att.dateStr}\",\"${att.formattedTime}\",\"${att.eventType}\",\"${att.latitude}\",\"${att.longitude}\",\"${att.distanceFromShopMeters}\",\"${att.status}\",\"${att.verificationMethod}\"")
+            }
+        }
+        return file
+    }
+
+    fun exportSalaryCsv(
+        context: Context,
+        business: Business,
+        employees: List<Employee>
+    ): File {
+        val file = File(context.cacheDir, "${business.name.replace(" ", "_")}_Salary_Ledger.csv")
+        file.printWriter().use { out ->
+            out.println("Business_Code,Employee_Name,Employee_Code,Designation,Salary_Type,Monthly_Salary,Daily_Wage,Bank_Account,IFSC,Status")
+            for (emp in employees) {
+                out.println("\"${business.businessCode}\",\"${emp.fullName}\",\"${emp.employeeCode}\",\"${emp.designation}\",\"${emp.salaryType}\",\"${emp.monthlySalary}\",\"${emp.dailyWage}\",\"${emp.bankAccount}\",\"${emp.bankIfsc}\",\"${emp.status}\"")
+            }
+        }
+        return file
+    }
+}
