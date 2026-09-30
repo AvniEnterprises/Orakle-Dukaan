@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -74,33 +75,20 @@ fun StatCard(
 ) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
-                .padding(14.dp)
+                .padding(vertical = 8.dp, horizontal = 4.dp)
                 .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OrakleSlate500
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
             Box(
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
                     .background(bgColor),
                 contentAlignment = Alignment.Center
@@ -109,9 +97,25 @@ fun StatCard(
                     imageVector = icon,
                     contentDescription = title,
                     tint = iconColor,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(16.dp)
                 )
             }
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = OrakleSlate500,
+                maxLines = 1,
+                fontSize = 10.sp,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -1277,6 +1281,27 @@ fun AddDocumentDialog(
     var docType by remember { mutableStateOf("Aadhaar") }
     var driveLink by remember { mutableStateOf("") }
     var expiryDate by remember { mutableStateOf("2030-12-31") }
+    val context = LocalContext.current
+
+    val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            try {
+                val docsDir = java.io.File(context.filesDir, "employee_docs").apply { mkdirs() }
+                val localFile = java.io.File(docsDir, "doc_${System.currentTimeMillis()}.jpg")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    java.io.FileOutputStream(localFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                driveLink = localFile.absolutePath
+                if (docName.isBlank()) docName = "$docType Document"
+            } catch (e: Exception) {
+                driveLink = uri.toString()
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1289,7 +1314,7 @@ fun AddDocumentDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    "Store verification documents securely via Google Drive shareable link.",
+                    "Store verification documents securely on local storage and cloud database.",
                     fontSize = 12.sp,
                     color = OrakleSlate600
                 )
@@ -1310,11 +1335,21 @@ fun AddDocumentDialog(
                         )
                     }
                 }
+
+                OutlinedButton(
+                    onClick = { photoPicker.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Select Photo / File from Device", fontSize = 12.sp)
+                }
+
                 OutlinedTextField(
                     value = driveLink,
                     onValueChange = { driveLink = it },
-                    label = { Text("Google Drive Link / File Ref *") },
-                    placeholder = { Text("https://drive.google.com/file/d/...") },
+                    label = { Text("File Path / Google Drive Link *") },
+                    placeholder = { Text("Selected device path or Drive link") },
                     modifier = Modifier.fillMaxWidth().testTag("doc_drive_link_input")
                 )
                 OutlinedTextField(

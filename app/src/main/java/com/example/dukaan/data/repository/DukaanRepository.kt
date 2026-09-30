@@ -5,6 +5,8 @@ import android.util.Log
 import com.example.dukaan.data.local.*
 import com.example.dukaan.data.model.*
 import com.example.dukaan.data.remote.SupabaseClient
+import com.example.dukaan.service.NotificationHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -15,7 +17,23 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.*
 
+private fun Throwable.isCancellation(): Boolean {
+    var curr: Throwable? = this
+    while (curr != null) {
+        if (curr is java.util.concurrent.CancellationException ||
+            curr is kotlinx.coroutines.CancellationException ||
+            curr.javaClass.name.contains("Cancellation") ||
+            curr.message?.contains("composition", ignoreCase = true) == true
+        ) {
+            return true
+        }
+        curr = curr.cause
+    }
+    return false
+}
+
 class DukaanRepository(context: Context) {
+    private val appContext = context.applicationContext
     private val dao = DukaanDatabase.getDatabase(context).dukaanDao()
     private val timeFormat = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
@@ -217,6 +235,10 @@ class DukaanRepository(context: Context) {
                 Result.failure(result.exceptionOrNull() ?: Exception("Unknown error"))
             }
         } catch (e: Exception) {
+            if (e.isCancellation()) {
+                Log.d("DukaanRepository", "syncBusinesses cancelled")
+                return@withContext Result.failure(e)
+            }
             Log.e("DukaanRepository", "Error syncing businesses from Supabase", e)
             Result.failure(e)
         }
@@ -401,6 +423,10 @@ class DukaanRepository(context: Context) {
                 }
             }
         } catch (e: Exception) {
+            if (e.isCancellation()) {
+                Log.d("DukaanRepository", "syncEmployeesAndAttendanceFromSupabase cancelled")
+                return@withContext
+            }
             Log.e("DukaanRepository", "syncEmployeesAndAttendanceFromSupabase failed", e)
         }
     }
@@ -422,6 +448,10 @@ class DukaanRepository(context: Context) {
                 }
             }
         } catch (e: Exception) {
+            if (e.isCancellation()) {
+                Log.d("DukaanRepository", "syncAllEmployeesFromSupabase cancelled")
+                return@withContext
+            }
             Log.e("DukaanRepository", "syncAllEmployeesFromSupabase failed", e)
         }
     }
@@ -568,6 +598,12 @@ class DukaanRepository(context: Context) {
                 }
             }
 
+            NotificationHelper.showNotification(
+                context = appContext,
+                title = "Duty ${eventType.name} Recorded",
+                message = "${employee.fullName}: Attendance punch ${eventType.name} saved at ${eventEntity.formattedTime} (${status.replace("_", " ")})"
+            )
+
             Result.success(eventEntity.toModel())
         } catch (e: Exception) {
             Log.e(TAG, "recordAttendancePunch failed", e)
@@ -643,6 +679,11 @@ class DukaanRepository(context: Context) {
         } catch (e: Exception) {
             Log.e("DukaanRepository", "applyLeave sync failed", e)
         }
+        NotificationHelper.showNotification(
+            context = appContext,
+            title = "Leave Request Sent",
+            message = "Applied for ${leave.leaveType} leave (${leave.startDate} to ${leave.endDate}, ${leave.days} days)."
+        )
     }
 
     suspend fun updateLeave(leave: LeaveRequest) = withContext(Dispatchers.IO) {
@@ -669,6 +710,11 @@ class DukaanRepository(context: Context) {
             } catch (e: Exception) {
                 Log.e("DukaanRepository", "updateLeaveStatus sync failed", e)
             }
+            NotificationHelper.showNotification(
+                context = appContext,
+                title = "Leave Request ${status.name}",
+                message = "Leave application has been ${status.name.lowercase()}."
+            )
         }
     }
 
@@ -689,6 +735,11 @@ class DukaanRepository(context: Context) {
         } catch (e: Exception) {
             Log.e("DukaanRepository", "saveAdvance sync failed", e)
         }
+        NotificationHelper.showNotification(
+            context = appContext,
+            title = "Advance Issued",
+            message = "Advance / Udhaar of ₹${advance.totalAmount.toInt()} issued."
+        )
         dao.insertAuditLog(
             AuditLogEntity(
                 id = UUID.randomUUID().toString(),
@@ -785,6 +836,11 @@ class DukaanRepository(context: Context) {
 
     suspend fun saveDocument(doc: EmployeeDocument) = withContext(Dispatchers.IO) {
         dao.insertDocument(doc.toEntity())
+        NotificationHelper.showNotification(
+            context = appContext,
+            title = "Document Uploaded",
+            message = "${doc.docType} (${doc.docName}) saved securely."
+        )
     }
 
     suspend fun updateDocument(doc: EmployeeDocument) = withContext(Dispatchers.IO) {
@@ -798,6 +854,10 @@ class DukaanRepository(context: Context) {
     // --- Support Messages ---
     fun getSupportMessages(businessId: String): Flow<List<SupportMessage>> {
         return dao.getSupportMessages(businessId).map { list -> list.map { it.toModel() } }
+    }
+
+    fun getAllSupportMessages(): Flow<List<SupportMessage>> {
+        return dao.getAllSupportMessages().map { list -> list.map { it.toModel() } }
     }
 
     suspend fun sendSupportMessage(msg: SupportMessage) = withContext(Dispatchers.IO) {

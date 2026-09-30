@@ -172,6 +172,9 @@ interface DukaanDao {
     @Query("SELECT * FROM support_messages WHERE businessId = :businessId ORDER BY timestamp ASC")
     fun getSupportMessages(businessId: String): Flow<List<SupportMessageEntity>>
 
+    @Query("SELECT * FROM support_messages ORDER BY timestamp ASC")
+    fun getAllSupportMessages(): Flow<List<SupportMessageEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSupportMessage(msg: SupportMessageEntity)
 

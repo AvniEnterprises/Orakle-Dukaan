@@ -385,6 +385,60 @@ object ReportGenerator {
         return file
     }
 
+    fun printPdf(context: Context, file: File, jobName: String = "Payslip_Print") {
+        try {
+            val printManager = context.getSystemService(Context.PRINT_SERVICE) as? android.print.PrintManager
+            if (printManager != null) {
+                val printAdapter = object : android.print.PrintDocumentAdapter() {
+                    override fun onLayout(
+                        oldAttributes: android.print.PrintAttributes?,
+                        newAttributes: android.print.PrintAttributes?,
+                        cancellationSignal: android.os.CancellationSignal?,
+                        callback: LayoutResultCallback?,
+                        extras: android.os.Bundle?
+                    ) {
+                        if (cancellationSignal?.isCanceled == true) {
+                            callback?.onLayoutCancelled()
+                            return
+                        }
+                        val info = android.print.PrintDocumentInfo.Builder(file.name)
+                            .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                            .setPageCount(1)
+                            .build()
+                        callback?.onLayoutFinished(info, true)
+                    }
+
+                    override fun onWrite(
+                        pages: Array<out android.print.PageRange>?,
+                        destination: android.os.ParcelFileDescriptor?,
+                        cancellationSignal: android.os.CancellationSignal?,
+                        callback: WriteResultCallback?
+                    ) {
+                        try {
+                            val input = java.io.FileInputStream(file)
+                            val output = java.io.FileOutputStream(destination?.fileDescriptor)
+                            val buf = ByteArray(1024)
+                            var bytesRead: Int
+                            while (input.read(buf).also { bytesRead = it } > 0) {
+                                output.write(buf, 0, bytesRead)
+                            }
+                            input.close()
+                            output.close()
+                            callback?.onWriteFinished(arrayOf(android.print.PageRange.ALL_PAGES))
+                        } catch (e: Exception) {
+                            callback?.onWriteFailed(e.message)
+                        }
+                    }
+                }
+                printManager.print(jobName, printAdapter, android.print.PrintAttributes.Builder().build())
+                return
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ReportGenerator", "PrintManager failed", e)
+        }
+        openOrShareFile(context, file)
+    }
+
     fun openOrShareFile(context: Context, file: File, mimeType: String = "application/pdf") {
         try {
             val uri = androidx.core.content.FileProvider.getUriForFile(

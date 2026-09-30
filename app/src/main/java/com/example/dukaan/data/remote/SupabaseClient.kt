@@ -9,6 +9,7 @@ import com.example.dukaan.data.local.ExpenseRecordEntity
 import com.example.dukaan.data.local.LeaveRequestEntity
 import com.example.dukaan.data.model.CurrentUser
 import com.example.dukaan.data.model.UserRole
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,6 +28,21 @@ data class ShopRemoteData(
     val expenses: List<ExpenseRecordEntity>,
     val advances: List<AdvanceUdhaarEntity>
 )
+
+fun Throwable.isCancellation(): Boolean {
+    var curr: Throwable? = this
+    while (curr != null) {
+        if (curr is java.util.concurrent.CancellationException ||
+            curr is kotlinx.coroutines.CancellationException ||
+            curr.javaClass.name.contains("Cancellation") ||
+            curr.message?.contains("composition", ignoreCase = true) == true
+        ) {
+            return true
+        }
+        curr = curr.cause
+    }
+    return false
+}
 
 object SupabaseClient {
     private const val TAG = "SupabaseClient"
@@ -249,6 +265,7 @@ object SupabaseClient {
             Log.i(TAG, "Fetched ${list.size} shops live from Supabase")
             Result.success(list)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "fetchAllShopsFromSupabase exception", e)
             Result.failure(e)
         }
@@ -985,6 +1002,7 @@ object SupabaseClient {
 
             Result.success(list)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "fetchAllEmployeesFromSupabase error", e)
             Result.failure(e)
         }
@@ -1292,6 +1310,10 @@ object SupabaseClient {
 
             Result.success(ShopRemoteData(emps, punches, leaves, expenses, advances))
         } catch (e: Exception) {
+            if (e.isCancellation()) {
+                Log.d(TAG, "fetchFullShopDataFromSupabase cancelled")
+                return@withContext Result.failure(e)
+            }
             Log.e(TAG, "fetchFullShopDataFromSupabase error", e)
             Result.failure(e)
         }
@@ -1418,6 +1440,10 @@ object SupabaseClient {
             }
             list
         } catch (e: Exception) {
+            if (e.isCancellation()) {
+                Log.d(TAG, "fetchAllRawUsersFromSupabase cancelled")
+                return@withContext emptyList()
+            }
             Log.e(TAG, "fetchAllRawUsersFromSupabase error", e)
             emptyList()
         }

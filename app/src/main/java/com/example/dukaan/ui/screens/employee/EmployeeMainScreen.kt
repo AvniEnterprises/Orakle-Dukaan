@@ -1,6 +1,7 @@
 package com.example.dukaan.ui.screens.employee
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -23,10 +24,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dukaan.data.model.*
 import com.example.dukaan.data.repository.DukaanRepository
+import com.example.dukaan.service.LocationHelper
+import com.example.dukaan.service.RealCameraSelfieDialog
+import com.example.dukaan.service.RealQrScannerDialog
 import com.example.dukaan.service.ReportGenerator
 import com.example.dukaan.ui.components.*
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -45,13 +50,44 @@ fun EmployeeMainScreen(
     var employee by remember { mutableStateOf<Employee?>(null) }
     var business by remember { mutableStateOf<Business?>(null) }
 
+    // Real device location state
+    var deviceLat by remember { mutableStateOf<Double?>(null) }
+    var deviceLng by remember { mutableStateOf<Double?>(null) }
+    var locationAccuracy by remember { mutableStateOf<Float?>(null) }
+    var isFetchingLocation by remember { mutableStateOf(false) }
+
+    fun refreshLocation() {
+        isFetchingLocation = true
+        LocationHelper.getRealLocation(
+            context = context,
+            onSuccess = { lat, lng, acc ->
+                deviceLat = lat
+                deviceLng = lng
+                locationAccuracy = acc
+                isFetchingLocation = false
+            },
+            onError = { _ ->
+                isFetchingLocation = false
+            }
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        refreshLocation()
+    }
+
+    // Silent background sync polling loop (Every 8 seconds)
     LaunchedEffect(employeeId, businessId) {
-        while (true) {
-            repository.syncBusinessesFromSupabase()
-            repository.syncEmployeesAndAttendanceFromSupabase(businessId)
-            employee = repository.getEmployeeById(employeeId)
-            business = repository.getBusinessById(businessId)
-            kotlinx.coroutines.delay(2500)
+        while (isActive) {
+            try {
+                repository.syncBusinessesFromSupabase()
+                repository.syncEmployeesAndAttendanceFromSupabase(businessId)
+                employee = repository.getEmployeeById(employeeId)
+                business = repository.getBusinessById(businessId)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) break
+            }
+            kotlinx.coroutines.delay(8000)
         }
     }
 
@@ -60,6 +96,7 @@ fun EmployeeMainScreen(
     val myAdvances by repository.getAdvancesForEmployee(employeeId).collectAsState(initial = emptyList())
     val myExpenses by repository.getExpensesForEmployee(employeeId).collectAsState(initial = emptyList())
     val myDocuments by repository.getDocumentsForEmployee(employeeId).collectAsState(initial = emptyList())
+    val supportMessages by repository.getSupportMessages(businessId).collectAsState(initial = emptyList())
 
     val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date()) }
     val todayPunches = attendanceHistory.filter { it.dateStr == todayStr }
@@ -72,12 +109,12 @@ fun EmployeeMainScreen(
     var isOfflineMode by remember { mutableStateOf(false) }
     val pendingSyncPunches = attendanceHistory.count { it.syncStatus == "PENDING_SYNC" }
 
-    // Simulated user coordinates (by default at shop, or toggled to test outside geofence)
+    // Real device coordinates or fallback to shop
     var isSimulatingOutside by remember { mutableStateOf(false) }
     val shopLat = business?.latitude ?: 26.9124
     val shopLng = business?.longitude ?: 75.7873
-    val currentLat = if (isSimulatingOutside) shopLat + 0.005 else shopLat + 0.0001
-    val currentLng = if (isSimulatingOutside) shopLng + 0.005 else shopLng + 0.0001
+    val currentLat = deviceLat ?: (if (isSimulatingOutside) shopLat + 0.005 else shopLat)
+    val currentLng = deviceLng ?: (if (isSimulatingOutside) shopLng + 0.005 else shopLng)
 
     val distanceMeters = remember(currentLat, currentLng, business) {
         business?.let { b ->
@@ -87,6 +124,8 @@ fun EmployeeMainScreen(
     val isInsideGeofence = distanceMeters <= (business?.geofenceRadiusMeters ?: 100)
 
     var selectedTab by remember { mutableStateOf(0) } // 0: Today, 1: History, 2: Salary/Udhaar, 3: Requests, 4: Profile
+    BackHandler(enabled = selectedTab != 0) { selectedTab = 0 }
+
     var showCameraDialog by remember { mutableStateOf(false) }
     var pendingPunchType by remember { mutableStateOf<AttendanceType?>(null) }
     var showLeaveDialog by remember { mutableStateOf(false) }
@@ -96,6 +135,13 @@ fun EmployeeMainScreen(
     var selectedExpenseForEdit by remember { mutableStateOf<ExpenseRecord?>(null) }
     var showQrScannerDialog by remember { mutableStateOf(false) }
     var isPunching by remember { mutableStateOf(false) }
+
+    // Document and PDF state
+    var showAddDocDialog by remember { mutableStateOf(false) }
+    var selectedDocForEdit by remember { mutableStateOf<EmployeeDocument?>(null) }
+    var selectedPdfFile by remember { mutableStateOf<java.io.File?>(null) }
+    var showPdfActionsDialog by remember { mutableStateOf(false) }
+    var supportText by remember { mutableStateOf("") }
 
     // Live Clock
     var currentTimeStr by remember { mutableStateOf("") }
@@ -250,6 +296,32 @@ fun EmployeeMainScreen(
                                     )
 
                                     Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Real GPS Coordinates and Refresh Button
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(14.dp), tint = OrakleRedPrimary)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (deviceLat != null) "Live GPS: ${String.format(Locale.ENGLISH, "%.4f, %.4f", currentLat, currentLng)}" else "Detecting GPS...",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = OrakleSlate600
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        IconButton(
+                                            onClick = { refreshLocation() },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            if (isFetchingLocation) {
+                                                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                                            } else {
+                                                Icon(Icons.Default.Refresh, contentDescription = "Refresh GPS", modifier = Modifier.size(14.dp))
+                                            }
+                                        }
+                                    }
 
                                     // Quick GPS Testing toggle for evaluator
                                     Row(
@@ -434,7 +506,9 @@ fun EmployeeMainScreen(
                                             business?.let { b ->
                                                 employee?.let { emp ->
                                                     val payslip = ReportGenerator.generatePayslipPdf(context, b, emp, "September 2026", 26, 1000.0)
-                                                    Toast.makeText(context, "Downloaded Payslip: ${payslip.name}", Toast.LENGTH_LONG).show()
+                                                    selectedPdfFile = payslip
+                                                    showPdfActionsDialog = true
+                                                    Toast.makeText(context, "Payslip generated: ${payslip.name}", Toast.LENGTH_SHORT).show()
                                                 }
                                             }
                                         },
@@ -443,7 +517,7 @@ fun EmployeeMainScreen(
                                     ) {
                                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Download Latest Payslip PDF", fontSize = 12.sp)
+                                        Text("Download & Print Payslip PDF", fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -653,21 +727,140 @@ fun EmployeeMainScreen(
                         }
 
                         item {
-                            Text("DOCUMENTS (Google Drive Cloud Storage)", fontWeight = FontWeight.Bold, color = OrakleSlate700)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("MY DOCUMENTS (${myDocuments.size})", fontWeight = FontWeight.Bold, color = OrakleSlate700)
+                                Button(
+                                    onClick = { showAddDocDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Upload", fontSize = 12.sp)
+                                }
+                            }
                         }
 
-                        items(myDocuments) { doc ->
+                        if (myDocuments.isEmpty()) {
+                            item {
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = OrakleSlate500, modifier = Modifier.size(32.dp))
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text("No documents uploaded yet", color = OrakleSlate600, fontSize = 12.sp)
+                                        Text("Upload Aadhaar, PAN, or Bank passbook for verification", color = OrakleSlate500, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        } else {
+                            items(myDocuments) { doc ->
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = OrakleRedPrimary)
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(doc.docName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text("Type: ${doc.docType} • Exp: ${doc.expiryDate}", fontSize = 11.sp, color = OrakleSlate500)
+                                            Text("Status: ${doc.verificationStatus}", fontSize = 11.sp, color = if (doc.verificationStatus == "VERIFIED") OrakleGreen else OrakleAmber)
+                                        }
+                                        IconButton(onClick = { selectedDocForEdit = doc }) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit Doc", tint = OrakleSlate600)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // SUPPORT / HELPDESK CHAT CARD WITH SHOP ADMIN
+                        item {
+                            Spacer(modifier = Modifier.height(6.dp))
                             Card(
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(14.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                             ) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = OrakleRedPrimary)
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(doc.docName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Text("Type: ${doc.docType} • Drive Ref: ${doc.driveFileId}", fontSize = 11.sp, color = OrakleSlate500)
-                                        Text("Status: ${doc.verificationStatus}", fontSize = 11.sp, color = OrakleGreen)
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Chat, contentDescription = null, tint = OrakleRedPrimary)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Help & Support with Shop Admin", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Send queries or issues directly to shop owner.", fontSize = 11.sp, color = OrakleSlate500)
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    val myShopMessages = supportMessages.takeLast(5)
+                                    if (myShopMessages.isNotEmpty()) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            myShopMessages.forEach { msg ->
+                                                val isMe = msg.senderRole == "EMPLOYEE"
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (isMe) OrakleGreenContainer else OrakleSlate100,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Column(modifier = Modifier.padding(8.dp)) {
+                                                        Text(msg.message, fontSize = 12.sp, color = OrakleSlate900)
+                                                        Text(
+                                                            text = "${if (isMe) "You" else msg.senderName} • ${SimpleDateFormat("hh:mm a", Locale.ENGLISH).format(Date(msg.timestamp))}",
+                                                            fontSize = 10.sp,
+                                                            color = OrakleSlate500
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedTextField(
+                                            value = supportText,
+                                            onValueChange = { supportText = it },
+                                            placeholder = { Text("Type query to shop owner...", fontSize = 12.sp) },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        IconButton(
+                                            onClick = {
+                                                if (supportText.isNotBlank()) {
+                                                    coroutineScope.launch {
+                                                        repository.sendSupportMessage(
+                                                            SupportMessage(
+                                                                id = UUID.randomUUID().toString(),
+                                                                businessId = businessId,
+                                                                senderRole = "EMPLOYEE",
+                                                                senderName = employee?.fullName ?: "Staff",
+                                                                message = supportText.trim()
+                                                            )
+                                                        )
+                                                        supportText = ""
+                                                        Toast.makeText(context, "Query sent to Admin!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.Send, contentDescription = "Send", tint = OrakleRedPrimary)
+                                        }
                                     }
                                 }
                             }
@@ -681,143 +874,150 @@ fun EmployeeMainScreen(
     // Live Camera Selfie Capture Dialog
     if (showCameraDialog && pendingPunchType != null) {
         val punchType = pendingPunchType!!
-        AlertDialog(
-            onDismissRequest = { showCameraDialog = false },
-            title = {
-                Text("Confirm $punchType with Live Photo", fontWeight = FontWeight.Bold)
+        RealCameraSelfieDialog(
+            onDismiss = {
+                showCameraDialog = false
+                pendingPunchType = null
             },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(160.dp)
-                            .clip(CircleShape)
-                            .background(OrakleSlate100)
-                            .border(3.dp, if (punchType == AttendanceType.IN) OrakleGreen else OrakleRedPrimary, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                Icons.Default.CameraAlt,
-                                contentDescription = "Camera Selfie",
-                                modifier = Modifier.size(48.dp),
-                                tint = OrakleRedPrimary
-                            )
-                            Text("Live Selfie", fontSize = 11.sp, color = OrakleSlate600)
-                        }
-                    }
-
-                    Text("GPS Coordinates:", fontSize = 11.sp, color = OrakleSlate500)
-                    Text("$currentLat, $currentLng", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-
-                    GeofenceStatusBadge(
-                        isInside = isInsideGeofence,
-                        distanceMeters = distanceMeters,
-                        radiusMeters = business?.geofenceRadiusMeters ?: 100
+            onPhotoCaptured = { photoFile ->
+                showCameraDialog = false
+                isPunching = true
+                coroutineScope.launch {
+                    val result = repository.recordAttendancePunch(
+                        businessId = businessId,
+                        employeeId = employeeId,
+                        eventType = punchType,
+                        userLat = currentLat,
+                        userLng = currentLng,
+                        photoUri = photoFile.absolutePath,
+                        method = "LIVE_CAMERA_GPS",
+                        isOfflineMode = isOfflineMode
                     )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        isPunching = true
-                        showCameraDialog = false
-                        coroutineScope.launch {
-                            val result = repository.recordAttendancePunch(
-                                businessId = businessId,
-                                employeeId = employeeId,
-                                eventType = punchType,
-                                userLat = currentLat,
-                                userLng = currentLng,
-                                photoUri = "mock_selfie_blob_${System.currentTimeMillis()}",
-                                method = "LIVE_GPS_PHOTO",
-                                isOfflineMode = isOfflineMode
-                            )
-                            isPunching = false
-                            if (result.isSuccess) {
-                                val ev = result.getOrNull()!!
-                                val msg = if (ev.isGeofenceValid) {
-                                    "Duty ${ev.eventType} recorded successfully at ${ev.formattedTime}!"
-                                } else {
-                                    "Punch recorded as OUTSIDE GEOFENCE (${ev.distanceFromShopMeters.toInt()}m from shop)."
-                                }
-                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                            } else {
-                                Toast.makeText(context, "Error: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                            }
+                    isPunching = false
+                    pendingPunchType = null
+                    if (result.isSuccess) {
+                        val ev = result.getOrNull()!!
+                        val msg = if (ev.isGeofenceValid) {
+                            "Duty ${ev.eventType} recorded successfully at ${ev.formattedTime} with live selfie photo!"
+                        } else {
+                            "Punch recorded as OUTSIDE GEOFENCE (${ev.distanceFromShopMeters.toInt()}m from shop)."
                         }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = if (punchType == AttendanceType.IN) OrakleGreen else OrakleRedPrimary),
-                    modifier = Modifier.testTag("confirm_punch_button")
-                ) {
-                    Text("Confirm & Punch $punchType")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCameraDialog = false }) {
-                    Text("Cancel")
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Error: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         )
     }
 
-    // QR Code Scanner Simulator Dialog
+    // QR Code Scanner Live Camera Dialog
     if (showQrScannerDialog) {
-        AlertDialog(
-            onDismissRequest = { showQrScannerDialog = false },
-            title = { Text("QR Gate Pass Scanner", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(160.dp)
-                            .background(OrakleSlate900, RoundedCornerShape(12.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(54.dp))
-                            Text("Scan Shop QR Code", color = Color.White, fontSize = 11.sp)
-                        }
+        RealQrScannerDialog(
+            expectedShopCode = business?.businessCode ?: businessId,
+            onDismiss = { showQrScannerDialog = false },
+            onQrScanned = { scannedCode ->
+                showQrScannerDialog = false
+                isPunching = true
+                coroutineScope.launch {
+                    val nextType = if (isCurrentlyWorking) AttendanceType.OUT else AttendanceType.IN
+                    val res = repository.recordAttendancePunch(
+                        businessId = businessId,
+                        employeeId = employeeId,
+                        eventType = nextType,
+                        userLat = currentLat,
+                        userLng = currentLng,
+                        photoUri = "QR_PASS_${scannedCode.take(20)}",
+                        method = "QR_GATE_PASS",
+                        isOfflineMode = isOfflineMode
+                    )
+                    isPunching = false
+                    if (res.isSuccess) {
+                        Toast.makeText(context, "QR Verified! Duty $nextType marked at ${res.getOrNull()?.formattedTime}.", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Error: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("Point camera to shop QR pass: ${business?.businessCode}", fontSize = 12.sp, color = OrakleSlate600)
+                }
+            }
+        )
+    }
+
+    // Add Document Dialog
+    if (showAddDocDialog) {
+        AddDocumentDialog(
+            businessId = businessId,
+            employeeId = employeeId,
+            onDismiss = { showAddDocDialog = false },
+            onSave = { doc ->
+                coroutineScope.launch {
+                    repository.saveDocument(doc)
+                    showAddDocDialog = false
+                    Toast.makeText(context, "Document uploaded successfully!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    // Edit Document Dialog
+    if (selectedDocForEdit != null) {
+        EditDocumentDialog(
+            doc = selectedDocForEdit!!,
+            onDismiss = { selectedDocForEdit = null },
+            onSave = { updated ->
+                coroutineScope.launch {
+                    repository.updateDocument(updated)
+                    selectedDocForEdit = null
+                    Toast.makeText(context, "Document updated!", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDelete = {
+                val docId = selectedDocForEdit!!.id
+                coroutineScope.launch {
+                    repository.deleteDocument(docId)
+                    selectedDocForEdit = null
+                    Toast.makeText(context, "Document deleted!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    // PDF Print and Download Action Dialog
+    if (showPdfActionsDialog && selectedPdfFile != null) {
+        val file = selectedPdfFile!!
+        AlertDialog(
+            onDismissRequest = { showPdfActionsDialog = false },
+            icon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = OrakleRedPrimary) },
+            title = { Text("Payslip Downloaded", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("File saved in device storage: ${file.name}", fontSize = 12.sp, color = OrakleSlate600)
+                    Text("Choose an option below to view or print the payslip:", fontSize = 12.sp)
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        showQrScannerDialog = false
-                        coroutineScope.launch {
-                            val nextType = if (isCurrentlyWorking) AttendanceType.OUT else AttendanceType.IN
-                            val res = repository.recordAttendancePunch(
-                                businessId = businessId,
-                                employeeId = employeeId,
-                                eventType = nextType,
-                                userLat = currentLat,
-                                userLng = currentLng,
-                                photoUri = "qr_verified",
-                                method = "QR_GATE_PASS",
-                                isOfflineMode = isOfflineMode
-                            )
-                            if (res.isSuccess) {
-                                Toast.makeText(context, "QR Verified! Duty $nextType marked.", Toast.LENGTH_LONG).show()
-                            }
-                        }
+                        ReportGenerator.printPdf(context, file, "Payslip_Print")
+                        showPdfActionsDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary)
                 ) {
-                    Text("Simulate QR Scan Punch")
+                    Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Print / Save PDF")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showQrScannerDialog = false }) { Text("Cancel") }
+                OutlinedButton(
+                    onClick = {
+                        ReportGenerator.openOrShareFile(context, file)
+                        showPdfActionsDialog = false
+                    }
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Open / Share")
+                }
             }
         )
     }

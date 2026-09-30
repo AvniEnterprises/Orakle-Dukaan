@@ -3,6 +3,7 @@ package com.example.dukaan.ui.screens.admin
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,6 +33,7 @@ import com.example.dukaan.data.repository.DukaanRepository
 import com.example.dukaan.service.ReportGenerator
 import com.example.dukaan.ui.components.*
 import com.example.ui.theme.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -47,18 +49,21 @@ fun AdminMainScreen(
     val coroutineScope = rememberCoroutineScope()
 
     var business by remember { mutableStateOf<Business?>(null) }
-    var isSyncing by remember { mutableStateOf(false) }
+    var isManualSyncing by remember { mutableStateOf(false) }
 
+    // Silent background sync polling loop (Every 8 seconds)
     LaunchedEffect(businessId) {
-        while (true) {
-            isSyncing = true
-            repository.syncEmployeesAndAttendanceFromSupabase(businessId)
-            val updated = repository.getBusinessById(businessId)
-            if (updated != null) {
-                business = updated
+        while (isActive) {
+            try {
+                repository.syncEmployeesAndAttendanceFromSupabase(businessId)
+                val updated = repository.getBusinessById(businessId)
+                if (updated != null) {
+                    business = updated
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) break
             }
-            isSyncing = false
-            kotlinx.coroutines.delay(2500)
+            kotlinx.coroutines.delay(8000)
         }
     }
 
@@ -71,6 +76,8 @@ fun AdminMainScreen(
     val supportMessages by repository.getSupportMessages(businessId).collectAsState(initial = emptyList())
 
     var selectedNavTab by remember { mutableStateOf(0) } // 0: Dashboard, 1: Staff, 2: Attendance, 3: Money/Udhaar, 4: More
+    BackHandler(enabled = selectedNavTab != 0) { selectedNavTab = 0 }
+
     var showAddEmployeeDialog by remember { mutableStateOf(false) }
     var showIssueAdvanceDialog by remember { mutableStateOf(false) }
     var showQrDialog by remember { mutableStateOf(false) }
@@ -81,6 +88,9 @@ fun AdminMainScreen(
     var selectedLeaveForEdit by remember { mutableStateOf<LeaveRequest?>(null) }
     var selectedDocForEdit by remember { mutableStateOf<EmployeeDocument?>(null) }
     var showManualPunchDialog by remember { mutableStateOf(false) }
+
+    var selectedPdfFile by remember { mutableStateOf<java.io.File?>(null) }
+    var showPdfActionsDialog by remember { mutableStateOf(false) }
 
     val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date()) }
     val todayPunches = attendanceList.filter { it.dateStr == todayStr }
@@ -111,14 +121,14 @@ fun AdminMainScreen(
                     IconButton(
                         onClick = {
                             coroutineScope.launch {
-                                isSyncing = true
+                                isManualSyncing = true
                                 repository.syncEmployeesAndAttendanceFromSupabase(businessId)
-                                isSyncing = false
+                                isManualSyncing = false
                                 Toast.makeText(context, "Live data synced from Supabase Cloud", Toast.LENGTH_SHORT).show()
                             }
                         }
                     ) {
-                        if (isSyncing) {
+                        if (isManualSyncing) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(18.dp),
                                 strokeWidth = 2.dp,
@@ -290,6 +300,8 @@ fun AdminMainScreen(
                                     onClick = {
                                         business?.let { b ->
                                             val file = ReportGenerator.generateAttendancePdf(context, b, employees, attendanceList, todayStr)
+                                            selectedPdfFile = file
+                                            showPdfActionsDialog = true
                                             Toast.makeText(context, "Generated: ${file.name}", Toast.LENGTH_LONG).show()
                                         }
                                     },
@@ -375,17 +387,18 @@ fun AdminMainScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("ALL ATTENDANCE RECORDS", fontWeight = FontWeight.Bold, color = OrakleSlate700)
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text("ALL ATTENDANCE RECORDS", fontWeight = FontWeight.Bold, color = OrakleSlate700, fontSize = 13.sp)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     Button(
                                         onClick = { showManualPunchDialog = true },
                                         colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary),
-                                        shape = RoundedCornerShape(8.dp)
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f)
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
@@ -398,7 +411,8 @@ fun AdminMainScreen(
                                                 Toast.makeText(context, "Exported: ${csv.name}", Toast.LENGTH_SHORT).show()
                                             }
                                         },
-                                        shape = RoundedCornerShape(8.dp)
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f)
                                     ) {
                                         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
@@ -446,6 +460,8 @@ fun AdminMainScreen(
                                                 onClick = {
                                                     business?.let { b ->
                                                         val file = ReportGenerator.generateSalaryReportPdf(context, b, employees, "September 2026")
+                                                        selectedPdfFile = file
+                                                        showPdfActionsDialog = true
                                                         Toast.makeText(context, "Salary Statement PDF: ${file.name}", Toast.LENGTH_LONG).show()
                                                     }
                                                 },
@@ -482,6 +498,8 @@ fun AdminMainScreen(
                                                     onClick = {
                                                         business?.let { b ->
                                                             val payslip = ReportGenerator.generatePayslipPdf(context, b, emp, "September 2026", 26, udhaarRec)
+                                                            selectedPdfFile = payslip
+                                                            showPdfActionsDialog = true
                                                             Toast.makeText(context, "Generated Payslip: ${payslip.name}", Toast.LENGTH_SHORT).show()
                                                         }
                                                     },
@@ -753,6 +771,7 @@ fun AdminMainScreen(
                             }
                         }
                         "DOCUMENTS" -> {
+                            BackHandler { moreSection = "MENU" }
                             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(onClick = { moreSection = "MENU" }) {
@@ -789,14 +808,62 @@ fun AdminMainScreen(
                             }
                         }
                         "SUPPORT" -> {
+                            BackHandler { moreSection = "MENU" }
                             var replyText by remember { mutableStateOf("") }
+                            var supportTargetRole by remember { mutableStateOf("SUPERADMIN") } // "SUPERADMIN" or "STAFF"
                             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(onClick = { moreSection = "MENU" }) {
                                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                                     }
-                                    Text("Chat with Superadmin", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text("Helpdesk & Support Chat", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 }
+
+                                val currentPlan = business?.plan?.uppercase() ?: "STANDARD"
+                                val isBasicPlan = currentPlan.contains("BASIC") || currentPlan.contains("FREE") || currentPlan.contains("TRIAL")
+                                val adminMessagesSent = supportMessages.count { it.senderRole == "ADMIN" }
+                                val planLimit = if (isBasicPlan) 15 else 999
+                                val quotaRemaining = (planLimit - adminMessagesSent).coerceAtLeast(0)
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isBasicPlan && quotaRemaining <= 2) OrakleAmberContainer else OrakleSlate100,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                                ) {
+                                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Support, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = "Plan: $currentPlan • ${if (currentPlan.contains("PRO") || currentPlan.contains("GROWTH") || currentPlan.contains("ENTERPRISE")) "24/7 Priority Dedicated Support (Unlimited)" else "Standard Tier ($quotaRemaining messages remaining)"}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = OrakleSlate700
+                                            )
+                                            if (isBasicPlan) {
+                                                Text(
+                                                    text = "Upgrade to Growth / Enterprise plan for 24/7 dedicated support desk.",
+                                                    fontSize = 10.sp,
+                                                    color = OrakleSlate500
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 6.dp)) {
+                                    FilterChip(
+                                        selected = supportTargetRole == "SUPERADMIN",
+                                        onClick = { supportTargetRole = "SUPERADMIN" },
+                                        label = { Text("To Superadmin", fontSize = 11.sp) }
+                                    )
+                                    FilterChip(
+                                        selected = supportTargetRole == "STAFF",
+                                        onClick = { supportTargetRole = "STAFF" },
+                                        label = { Text("To Staff / Employees", fontSize = 11.sp) }
+                                    )
+                                }
+
                                 LazyColumn(
                                     modifier = Modifier.weight(1f),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -819,7 +886,7 @@ fun AdminMainScreen(
                                                 )
                                             }
                                             Text(
-                                                text = if (isMe) "You" else "Superadmin Support",
+                                                text = "${if (isMe) "You (Admin)" else msg.senderName} (${msg.senderRole}) • ${SimpleDateFormat("hh:mm a", Locale.ENGLISH).format(Date(msg.timestamp))}",
                                                 fontSize = 10.sp,
                                                 color = OrakleSlate500,
                                                 modifier = Modifier.padding(horizontal = 4.dp)
@@ -834,24 +901,29 @@ fun AdminMainScreen(
                                     OutlinedTextField(
                                         value = replyText,
                                         onValueChange = { replyText = it },
-                                        placeholder = { Text("Ask Superadmin...") },
+                                        placeholder = { Text(if (supportTargetRole == "SUPERADMIN") "Message Superadmin..." else "Message Staff...", fontSize = 12.sp) },
                                         modifier = Modifier.weight(1f)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     IconButton(
                                         onClick = {
                                             if (replyText.isNotBlank()) {
+                                                if (isBasicPlan && quotaRemaining <= 0) {
+                                                    Toast.makeText(context, "Support message limit reached for $currentPlan plan. Contact Superadmin to upgrade!", Toast.LENGTH_LONG).show()
+                                                    return@IconButton
+                                                }
                                                 coroutineScope.launch {
                                                     repository.sendSupportMessage(
                                                         SupportMessage(
                                                             id = UUID.randomUUID().toString(),
                                                             businessId = businessId,
                                                             senderRole = "ADMIN",
-                                                            senderName = business?.ownerName ?: "Admin",
-                                                            message = replyText
+                                                            senderName = business?.ownerName ?: "Shop Admin",
+                                                            message = replyText.trim()
                                                         )
                                                     )
                                                     replyText = ""
+                                                    Toast.makeText(context, "Message sent!", Toast.LENGTH_SHORT).show()
                                                 }
                                             }
                                         }
@@ -1336,7 +1408,10 @@ fun AttendancePunchRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     modifier = Modifier
                         .size(36.dp)
@@ -1351,13 +1426,24 @@ fun AttendancePunchRow(
                         color = if (punch.eventType == AttendanceType.IN) Color(0xFF166534) else OrakleOnRedContainer
                     )
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(employeeName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("${punch.formattedTime} • ${punch.dateStr}", fontSize = 11.sp, color = OrakleSlate500)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f, fill = false)) {
+                    Text(
+                        text = employeeName,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${punch.formattedTime} • ${punch.dateStr}",
+                        fontSize = 11.sp,
+                        color = OrakleSlate500,
+                        maxLines = 1
+                    )
                 }
             }
-
+            Spacer(modifier = Modifier.width(6.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Surface(
                     shape = RoundedCornerShape(6.dp),
@@ -1365,7 +1451,7 @@ fun AttendancePunchRow(
                 ) {
                     Text(
                         text = if (punch.isGeofenceValid) "Inside Shop ✓" else "Outside ✕",
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (punch.isGeofenceValid) Color(0xFF166534) else OrakleOnRedContainer,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1398,10 +1484,13 @@ fun EmployeeCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(42.dp)
                         .clip(CircleShape)
                         .background(OrakleSlate100),
                     contentAlignment = Alignment.Center
@@ -1410,14 +1499,31 @@ fun EmployeeCard(
                         text = employee.fullName.take(2).uppercase(),
                         fontWeight = FontWeight.Bold,
                         color = OrakleRedPrimary,
-                        fontSize = 16.sp
+                        fontSize = 15.sp
                     )
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(employee.fullName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("${employee.designation} • ${employee.employeeCode}", fontSize = 12.sp, color = OrakleSlate600)
-                    Text("Salary: ₹${employee.monthlySalary.toInt()}/mo (${employee.salaryType})", fontSize = 11.sp, color = OrakleSlate500)
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f, fill = false)) {
+                    Text(
+                        text = employee.fullName,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${employee.designation} • ${employee.employeeCode}",
+                        fontSize = 12.sp,
+                        color = OrakleSlate600,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Salary: ₹${employee.monthlySalary.toInt()}/mo (${employee.salaryType})",
+                        fontSize = 11.sp,
+                        color = OrakleSlate500,
+                        maxLines = 1
+                    )
                 }
             }
 

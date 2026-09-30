@@ -57,18 +57,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Request Camera & Location permissions at startup
+                // Request Camera, Location & Notification permissions at startup
                 val context = LocalContext.current
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
                 ) { /* Permissions result handled gracefully */ }
 
                 LaunchedEffect(Unit) {
-                    val permissionsNeeded = arrayOf(
+                    val perms = mutableListOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.ACCESS_COARSE_LOCATION,
                         Manifest.permission.CAMERA
-                    ).filter {
+                    )
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    val permissionsNeeded = perms.filter {
                         ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
                     }
                     if (permissionsNeeded.isNotEmpty()) {
