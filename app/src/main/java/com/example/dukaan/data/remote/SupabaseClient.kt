@@ -88,12 +88,14 @@ object SupabaseClient {
                 val roleStr = meta.optString("role", "")
                 val role = when {
                     roleStr.equals("SUPERADMIN", ignoreCase = true) || userEmail.contains("superadmin", ignoreCase = true) -> UserRole.SUPERADMIN
+                    roleStr.equals("AGENT", ignoreCase = true) || roleStr.equals("FIELD_AGENT", ignoreCase = true) -> UserRole.AGENT
                     roleStr.equals("EMPLOYEE", ignoreCase = true) -> UserRole.EMPLOYEE
                     else -> UserRole.BUSINESS_ADMIN
                 }
-                val name = meta.optString("name", meta.optString("owner_name", if (role == UserRole.EMPLOYEE) "Staff Member" else "Shop Owner"))
+                val name = meta.optString("name", meta.optString("owner_name", if (role == UserRole.EMPLOYEE) "Staff Member" else if (role == UserRole.AGENT) "Field Agent" else "Shop Owner"))
                 val bizId = meta.optString("shop_id", meta.optString("business_id", userId))
                 val empId = meta.optString("employee_id", if (role == UserRole.EMPLOYEE) userId else null)
+                val agtId = meta.optString("agent_id", if (role == UserRole.AGENT) userId else null)
 
                 Result.success(
                     CurrentUser(
@@ -102,7 +104,8 @@ object SupabaseClient {
                         email = userEmail,
                         name = name,
                         businessId = bizId,
-                        employeeId = empId
+                        employeeId = empId,
+                        agentId = agtId
                     )
                 )
             } else {
@@ -129,6 +132,15 @@ object SupabaseClient {
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val url = "$SUPABASE_URL/auth/v1/admin/users"
+            val cleanPhone = business.phone.replace(Regex("[^0-9]"), "")
+            val effectiveEmail = if (business.email.isNotBlank() && business.email.contains("@")) {
+                business.email.trim().replace(" ", "")
+            } else if (cleanPhone.length >= 6) {
+                "shop_${cleanPhone}@dukaan.orakle.in"
+            } else {
+                "shop_${business.businessCode.lowercase().replace(Regex("[^a-z0-9]"), "")}@dukaan.orakle.in"
+            }
+
             val userMeta = JSONObject().apply {
                 put("role", "BUSINESS_ADMIN")
                 put("status", business.status)
@@ -139,7 +151,7 @@ object SupabaseClient {
                 put("owner_name", business.ownerName)
                 put("name", business.ownerName)
                 put("phone", business.phone)
-                put("email", business.email)
+                put("email", if (business.email.isNotBlank()) business.email.trim() else effectiveEmail)
                 put("password", rawPassword)
                 put("business_type", business.businessType)
                 put("address", business.address)
@@ -162,7 +174,7 @@ object SupabaseClient {
             }
 
             val bodyJson = JSONObject().apply {
-                put("email", business.email.trim())
+                put("email", effectiveEmail)
                 put("password", rawPassword.trim())
                 put("email_confirm", true)
                 put("user_metadata", userMeta)
@@ -498,10 +510,13 @@ object SupabaseClient {
         rawPassword: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val userEmail = if (employee.email.isNotBlank()) {
-                employee.email.trim()
+            val cleanPhone = employee.phone.replace(Regex("[^0-9]"), "")
+            val userEmail = if (employee.email.isNotBlank() && employee.email.contains("@")) {
+                employee.email.trim().replace(" ", "")
+            } else if (cleanPhone.length >= 6) {
+                "emp_${cleanPhone}@dukaan.orakle.in"
             } else {
-                "${employee.phone.trim()}@employee.dukaan"
+                "emp_${employee.employeeCode.lowercase().replace(Regex("[^a-z0-9]"), "")}@dukaan.orakle.in"
             }
 
             val meta = JSONObject().apply {

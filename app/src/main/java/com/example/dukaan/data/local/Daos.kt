@@ -15,8 +15,11 @@ interface DukaanDao {
     @Query("SELECT * FROM businesses WHERE id = :id")
     suspend fun getBusinessById(id: String): BusinessEntity?
 
-    @Query("SELECT * FROM businesses WHERE phone = :identifier OR email = :identifier LIMIT 1")
+    @Query("SELECT * FROM businesses WHERE phone = :identifier OR LOWER(email) = LOWER(:identifier) OR UPPER(businessCode) = UPPER(:identifier) OR id = :identifier LIMIT 1")
     suspend fun getBusinessByContact(identifier: String): BusinessEntity?
+
+    @Query("SELECT * FROM businesses WHERE businessCode = :code LIMIT 1")
+    suspend fun getBusinessByCode(code: String): BusinessEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBusiness(business: BusinessEntity)
@@ -46,8 +49,11 @@ interface DukaanDao {
     @Query("SELECT * FROM employees WHERE phone = :phone LIMIT 1")
     suspend fun getEmployeeByPhone(phone: String): EmployeeEntity?
 
-    @Query("SELECT * FROM employees WHERE phone = :identifier OR email = :identifier LIMIT 1")
+    @Query("SELECT * FROM employees WHERE phone = :identifier OR LOWER(email) = LOWER(:identifier) OR UPPER(employeeCode) = UPPER(:identifier) OR id = :identifier LIMIT 1")
     suspend fun getEmployeeByContact(identifier: String): EmployeeEntity?
+
+    @Query("SELECT * FROM employees WHERE employeeCode = :code LIMIT 1")
+    suspend fun getEmployeeByCode(code: String): EmployeeEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEmployee(employee: EmployeeEntity)
@@ -204,7 +210,10 @@ interface DukaanDao {
     @Query("SELECT * FROM agents WHERE agentCode = :code LIMIT 1")
     suspend fun getAgentByCode(code: String): AgentEntity?
 
-    @Query("SELECT * FROM agents WHERE phone = :contact OR email = :contact LIMIT 1")
+    @Query("SELECT * FROM agents")
+    suspend fun getAllAgentsList(): List<AgentEntity>
+
+    @Query("SELECT * FROM agents WHERE phone = :contact OR LOWER(email) = LOWER(:contact) OR UPPER(agentCode) = UPPER(:contact) OR id = :contact LIMIT 1")
     suspend fun getAgentByContact(contact: String): AgentEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
