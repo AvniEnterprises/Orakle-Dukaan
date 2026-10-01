@@ -215,7 +215,9 @@ fun EditBusinessDialog(
     isSuperAdmin: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (Business) -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    onExportPdf: (() -> Unit)? = null,
+    onUploadLogo: (() -> Unit)? = null
 ) {
     var name by remember { mutableStateOf(business.name) }
     var ownerName by remember { mutableStateOf(business.ownerName) }
@@ -414,6 +416,36 @@ fun EditBusinessDialog(
                             contentPadding = PaddingValues(2.dp)
                         ) {
                             Text("Reject", fontSize = 11.sp, color = if (status == BusinessStatus.REJECTED) Color.White else OrakleSlate900)
+                        }
+                    }
+                }
+
+                if (onUploadLogo != null || onExportPdf != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("SHOP ACTIONS & PROFILE PDF", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrakleSlate600)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (onUploadLogo != null) {
+                            OutlinedButton(
+                                onClick = onUploadLogo,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Upload Logo", fontSize = 11.sp)
+                            }
+                        }
+                        if (onExportPdf != null) {
+                            Button(
+                                onClick = onExportPdf,
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Export PDF", fontSize = 11.sp)
+                            }
                         }
                     }
                 }

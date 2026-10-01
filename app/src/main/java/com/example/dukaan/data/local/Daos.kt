@@ -178,6 +178,15 @@ interface DukaanDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSupportMessage(msg: SupportMessageEntity)
 
+    @Query("DELETE FROM support_messages WHERE businessId = :businessId")
+    suspend fun clearSupportMessages(businessId: String)
+
+    @Query("DELETE FROM leave_requests WHERE businessId = :businessId AND status != 'PENDING'")
+    suspend fun clearCompletedLeaves(businessId: String)
+
+    @Query("DELETE FROM leave_requests WHERE employeeId = :employeeId AND status != 'PENDING'")
+    suspend fun clearEmployeeCompletedLeaves(employeeId: String)
+
     // Audit logs
     @Query("SELECT * FROM audit_logs WHERE businessId = :businessId ORDER BY timestamp DESC LIMIT 100")
     fun getAuditLogs(businessId: String): Flow<List<AuditLogEntity>>

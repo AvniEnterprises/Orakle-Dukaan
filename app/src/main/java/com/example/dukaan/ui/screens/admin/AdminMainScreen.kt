@@ -4,6 +4,9 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -91,6 +94,34 @@ fun AdminMainScreen(
 
     var selectedPdfFile by remember { mutableStateOf<java.io.File?>(null) }
     var showPdfActionsDialog by remember { mutableStateOf(false) }
+    var showReportChoiceDialog by remember { mutableStateOf(false) }
+    var previewingPhotoUrl by remember { mutableStateOf<String?>(null) }
+
+    val logoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val bmp = android.graphics.BitmapFactory.decodeStream(inputStream)
+                    inputStream?.close()
+                    if (bmp != null) {
+                        val logosDir = java.io.File(context.filesDir, "shop_logos").apply { mkdirs() }
+                        val file = java.io.File(logosDir, "logo_${businessId}.jpg")
+                        val fos = java.io.FileOutputStream(file)
+                        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, fos)
+                        fos.flush()
+                        fos.close()
+                        repository.updateBusinessLogo(businessId, file)
+                        Toast.makeText(context, "Shop Logo uploaded successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Failed to upload logo: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date()) }
     val todayPunches = attendanceList.filter { it.dateStr == todayStr }
@@ -118,26 +149,6 @@ fun AdminMainScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                isManualSyncing = true
-                                repository.syncEmployeesAndAttendanceFromSupabase(businessId)
-                                isManualSyncing = false
-                                Toast.makeText(context, "Live data synced from Supabase Cloud", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    ) {
-                        if (isManualSyncing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = OrakleRedPrimary
-                            )
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = "Sync from Cloud", tint = OrakleSlate700)
-                        }
-                    }
                     IconButton(onClick = { showEditShopDialog = true }) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit Shop Details", tint = OrakleRedPrimary)
                     }
@@ -336,7 +347,11 @@ fun AdminMainScreen(
                             val empMap = employees.associateBy { it.id }
                             items(todayPunches) { punch ->
                                 val emp = empMap[punch.employeeId]
-                                AttendancePunchRow(punch = punch, employeeName = emp?.fullName ?: "Staff")
+                                AttendancePunchRow(
+                                    punch = punch,
+                                    employeeName = emp?.fullName ?: "Staff",
+                                    onPhotoClick = { previewingPhotoUrl = it }
+                                )
                             }
                         }
                     }
@@ -425,7 +440,11 @@ fun AdminMainScreen(
                         val empMap = employees.associateBy { it.id }
                         items(attendanceList) { punch ->
                             val emp = empMap[punch.employeeId]
-                            AttendancePunchRow(punch = punch, employeeName = emp?.fullName ?: "Staff")
+                            AttendancePunchRow(
+                                punch = punch,
+                                employeeName = emp?.fullName ?: "Staff",
+                                onPhotoClick = { previewingPhotoUrl = it }
+                            )
                         }
                     }
                 }
@@ -698,26 +717,40 @@ fun AdminMainScreen(
                                 item {
                                     MoreMenuItem(
                                         title = "Download Reports (PDF / CSV)",
-                                        subtitle = "Master attendance, salary statement & ledger",
+                                        subtitle = "Shop profile, master attendance & salary statement",
                                         icon = Icons.Default.Description,
-                                        onClick = {
-                                            business?.let { b ->
-                                                val f1 = ReportGenerator.generateAttendancePdf(context, b, employees, attendanceList, todayStr)
-                                                val f2 = ReportGenerator.generateSalaryReportPdf(context, b, employees, "September 2026")
-                                                Toast.makeText(context, "Generated 2 PDFs in cache: ${f1.name} & ${f2.name}", Toast.LENGTH_LONG).show()
-                                            }
-                                        }
+                                        onClick = { showReportChoiceDialog = true }
                                     )
                                 }
                             }
                         }
                         "LEAVES" -> {
                             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(onClick = { moreSection = "MENU" }) {
-                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = { moreSection = "MENU" }) {
+                                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                        }
+                                        Text("Leave Requests", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     }
-                                    Text("Leave Requests", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    if (leaves.any { it.status != LeaveStatus.PENDING }) {
+                                        TextButton(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    repository.clearCompletedLeaves(businessId)
+                                                    Toast.makeText(context, "Completed leave history cleared!", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Clear History", fontSize = 11.sp, color = OrakleRedPrimary)
+                                        }
+                                    }
                                 }
                                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     val empMap = employees.associateBy { it.id }
@@ -812,11 +845,31 @@ fun AdminMainScreen(
                             var replyText by remember { mutableStateOf("") }
                             var supportTargetRole by remember { mutableStateOf("SUPERADMIN") } // "SUPERADMIN" or "STAFF"
                             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(onClick = { moreSection = "MENU" }) {
-                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = { moreSection = "MENU" }) {
+                                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                                        }
+                                        Text("Helpdesk & Support Chat", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     }
-                                    Text("Helpdesk & Support Chat", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    if (supportMessages.isNotEmpty()) {
+                                        TextButton(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    repository.clearSupportMessages(businessId)
+                                                    Toast.makeText(context, "Support chat cleared!", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Clear Chat", fontSize = 11.sp)
+                                        }
+                                    }
                                 }
 
                                 val currentPlan = business?.plan?.uppercase() ?: "STANDARD"
@@ -953,6 +1006,19 @@ fun AdminMainScreen(
                         showEditShopDialog = false
                         Toast.makeText(context, "Shop details updated", Toast.LENGTH_SHORT).show()
                     }
+                },
+                onExportPdf = {
+                    val file = ReportGenerator.generateBusinessProfilePdf(context, b, employees, attendanceList)
+                    selectedPdfFile = file
+                    showPdfActionsDialog = true
+                    Toast.makeText(context, "Generated: ${file.name}", Toast.LENGTH_SHORT).show()
+                },
+                onUploadLogo = {
+                    logoPickerLauncher.launch(
+                        PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
                 }
             )
         }
@@ -1328,6 +1394,202 @@ fun AdminMainScreen(
             confirmButton = {}
         )
     }
+
+    // PDF Actions Dialog (Print / Download / Share)
+    if (showPdfActionsDialog && selectedPdfFile != null) {
+        val file = selectedPdfFile!!
+        AlertDialog(
+            onDismissRequest = { showPdfActionsDialog = false },
+            icon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = OrakleRedPrimary) },
+            title = { Text("PDF Report Ready", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("File saved in device storage: ${file.name}", fontSize = 12.sp, color = OrakleSlate600)
+                    Text("Choose an action below to print or download the physical document:", fontSize = 11.sp, color = OrakleSlate500)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        ReportGenerator.printPdf(context, file, file.nameWithoutExtension)
+                        showPdfActionsDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary)
+                ) {
+                    Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Print Document")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        ReportGenerator.openOrShareFile(context, file)
+                        showPdfActionsDialog = false
+                    }
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Open / Save")
+                }
+            }
+        )
+    }
+
+    // Report Choice Dialog
+    if (showReportChoiceDialog) {
+        AlertDialog(
+            onDismissRequest = { showReportChoiceDialog = false },
+            icon = { Icon(Icons.Default.Description, contentDescription = null, tint = OrakleRedPrimary) },
+            title = { Text("Select Report to Export", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    business?.let { b ->
+                        OutlinedButton(
+                            onClick = {
+                                val file = ReportGenerator.generateBusinessProfilePdf(context, b, employees, attendanceList)
+                                selectedPdfFile = file
+                                showReportChoiceDialog = false
+                                showPdfActionsDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("1. Shop Master Profile PDF", fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val file = ReportGenerator.generateAttendancePdf(context, b, employees, attendanceList, todayStr)
+                                selectedPdfFile = file
+                                showReportChoiceDialog = false
+                                showPdfActionsDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.CalendarToday, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("2. Today's Attendance PDF", fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val file = ReportGenerator.generateSalaryReportPdf(context, b, employees, "September 2026")
+                                selectedPdfFile = file
+                                showReportChoiceDialog = false
+                                showPdfActionsDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("3. Monthly Salary Statement PDF", fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val file = ReportGenerator.exportSalaryCsv(context, b, employees)
+                                selectedPdfFile = file
+                                showReportChoiceDialog = false
+                                showPdfActionsDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.TableChart, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("4. Staff Salary Ledger CSV", fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showReportChoiceDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Photo Preview Dialog for Admin to verify actual clicked selfie
+    if (previewingPhotoUrl != null) {
+        val photoUrl = previewingPhotoUrl!!
+        AlertDialog(
+            onDismissRequest = { previewingPhotoUrl = null },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Attendance Selfie Photo", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    IconButton(onClick = { previewingPhotoUrl = null }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+            },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val localFile = java.io.File(photoUrl)
+                    val bitmap = remember(photoUrl) {
+                        try {
+                            if (localFile.exists()) {
+                                android.graphics.BitmapFactory.decodeFile(localFile.absolutePath)
+                            } else null
+                        } catch (_: Exception) { null }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(240.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(OrakleSlate100)
+                            .border(2.dp, OrakleSlate300, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Attendance Photo",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = if (photoUrl.startsWith("http")) "Stored in Cloud Bucket:\n$photoUrl" else "Saved in device storage:\n${localFile.name}",
+                                    fontSize = 11.sp,
+                                    color = OrakleSlate600,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                    Text("Verified original camera capture with live geofencing.", fontSize = 11.sp, color = OrakleSlate500)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { previewingPhotoUrl = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary)
+                ) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1395,7 +1657,8 @@ fun MoreMenuItem(
 @Composable
 fun AttendancePunchRow(
     punch: AttendanceEvent,
-    employeeName: String
+    employeeName: String,
+    onPhotoClick: ((String) -> Unit)? = null
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -1462,6 +1725,23 @@ fun AttendancePunchRow(
                     fontSize = 10.sp,
                     color = OrakleSlate500
                 )
+                if (punch.photoUri.isNotBlank() && !punch.photoUri.startsWith("QR_PASS")) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = OrakleRedLight,
+                        modifier = Modifier.clickable { onPhotoClick?.invoke(punch.photoUri) }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = "View Photo", modifier = Modifier.size(10.dp), tint = OrakleRedPrimary)
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text("Selfie", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = OrakleRedPrimary)
+                        }
+                    }
+                }
             }
         }
     }

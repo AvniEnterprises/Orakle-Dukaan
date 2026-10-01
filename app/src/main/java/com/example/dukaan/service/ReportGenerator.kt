@@ -3,6 +3,7 @@ package com.example.dukaan.service
 import android.content.Context
 import android.graphics.*
 import android.graphics.pdf.PdfDocument
+import android.os.Environment
 import com.example.dukaan.data.model.*
 import java.io.File
 import java.io.FileOutputStream
@@ -499,6 +500,84 @@ object ReportGenerator {
                 out.println("\"${business.businessCode}\",\"${emp.fullName}\",\"${emp.employeeCode}\",\"${emp.designation}\",\"${emp.salaryType}\",\"${emp.monthlySalary}\",\"${emp.dailyWage}\",\"${emp.bankAccount}\",\"${emp.bankIfsc}\",\"${emp.status}\"")
             }
         }
+        return file
+    }
+
+    fun generateBusinessProfilePdf(
+        context: Context,
+        business: Business,
+        employees: List<Employee>,
+        attendanceList: List<AttendanceEvent>
+    ): File {
+        val pdfDoc = android.graphics.pdf.PdfDocument()
+        val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+        val page = pdfDoc.startPage(pageInfo)
+        val canvas = page.canvas
+
+        val paintTitle = Paint().apply {
+            color = Color.parseColor("#991B1B")
+            textSize = 20f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val paintSub = Paint().apply {
+            color = Color.parseColor("#475569")
+            textSize = 12f
+        }
+        val paintBold = Paint().apply {
+            color = Color.parseColor("#0F172A")
+            textSize = 12f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val paintLine = Paint().apply {
+            color = Color.parseColor("#E2E8F0")
+            strokeWidth = 1f
+        }
+
+        canvas.drawText("ORAKLE DUKAAN - BUSINESS PROFILE", 40f, 50f, paintTitle)
+        canvas.drawText("Shop & Operational Master Summary Report", 40f, 70f, paintSub)
+        canvas.drawLine(40f, 85f, 555f, 85f, paintLine)
+
+        var y = 115f
+        canvas.drawText("Business Name: ${business.name}", 40f, y, paintBold)
+        y += 20f
+        canvas.drawText("Business Code: ${business.businessCode}", 40f, y, paintSub)
+        y += 20f
+        canvas.drawText("Owner Name: ${business.ownerName}  |  Phone: ${business.phone}", 40f, y, paintSub)
+        y += 20f
+        canvas.drawText("Address: ${business.address}", 40f, y, paintSub)
+        y += 20f
+        canvas.drawText("Plan: ${business.plan}  |  Status: ${business.status.name}", 40f, y, paintSub)
+        y += 20f
+        canvas.drawText("Geofence Radius: ${business.geofenceRadiusMeters} meters  |  Coordinates: (${business.latitude}, ${business.longitude})", 40f, y, paintSub)
+        y += 20f
+        canvas.drawText("Shift Hours: ${business.shiftStart} to ${business.shiftEnd}  |  Grace: ${business.graceMinutes} mins", 40f, y, paintSub)
+        y += 30f
+
+        canvas.drawLine(40f, y, 555f, y, paintLine)
+        y += 25f
+        canvas.drawText("REGISTERED EMPLOYEES (${employees.size} / ${business.employeeLimit})", 40f, y, paintBold)
+        y += 20f
+
+        for (emp in employees.take(15)) {
+            canvas.drawText("• ${emp.fullName} (${emp.employeeCode}) - ${emp.designation} | ₹${emp.monthlySalary.toInt()}/mo", 45f, y, paintSub)
+            y += 18f
+        }
+
+        y += 20f
+        canvas.drawLine(40f, y, 555f, y, paintLine)
+        y += 25f
+        canvas.drawText("ATTENDANCE RECORDS: ${attendanceList.size} Total Punches Recorded", 40f, y, paintBold)
+        y += 40f
+        canvas.drawText("Generated on ${SimpleDateFormat("dd-MM-yyyy hh:mm a", Locale.ENGLISH).format(Date())} via Orakle Dukaan", 40f, y, paintSub)
+
+        pdfDoc.finishPage(page)
+        val targetDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
+        val safeName = business.name.replace("\\s+".toRegex(), "_")
+        val file = File(targetDir, "${safeName}_Profile_Summary.pdf")
+        val out = FileOutputStream(file)
+        pdfDoc.writeTo(out)
+        out.close()
+        pdfDoc.close()
         return file
     }
 }

@@ -28,6 +28,7 @@ import androidx.core.content.ContextCompat
 import com.example.dukaan.data.model.CurrentUser
 import com.example.dukaan.data.model.UserRole
 import com.example.dukaan.data.repository.DukaanRepository
+import com.example.dukaan.service.SessionManager
 import com.example.dukaan.ui.components.OrakleLogoBrand
 import com.example.dukaan.ui.screens.admin.AdminMainScreen
 import com.example.dukaan.ui.screens.auth.BusinessRegisterScreen
@@ -92,8 +93,9 @@ fun OrakleDukaanApp(
     repository: DukaanRepository,
     modifier: Modifier = Modifier
 ) {
-    // Current logged-in user (Default null -> Login Screen)
-    var currentUser by remember { mutableStateOf<CurrentUser?>(null) }
+    val context = LocalContext.current
+    // Current logged-in user with 12-hour session persistence
+    var currentUser by remember { mutableStateOf(SessionManager.getUserSession(context)) }
 
     var isRegisteringShop by remember { mutableStateOf(false) }
 
@@ -106,7 +108,10 @@ fun OrakleDukaanApp(
             currentUser?.let { user ->
                 TopAppRoleBar(
                     user = user,
-                    onLogout = { currentUser = null }
+                    onLogout = {
+                        SessionManager.clearUserSession(context)
+                        currentUser = null
+                    }
                 )
             }
 
@@ -127,18 +132,27 @@ fun OrakleDukaanApp(
                     currentUser == null -> {
                         LoginScreen(
                             repository = repository,
-                            onLoginSuccess = { user -> currentUser = user },
+                            onLoginSuccess = { user ->
+                                SessionManager.saveUserSession(context, user)
+                                currentUser = user
+                            },
                             onOpenRegister = { isRegisteringShop = true }
                         )
                     }
 
                     currentUser?.role == UserRole.SUPERADMIN -> {
-                        BackHandler { currentUser = null }
+                        BackHandler {
+                            SessionManager.clearUserSession(context)
+                            currentUser = null
+                        }
                         SuperAdminScreen(repository = repository)
                     }
 
                     currentUser?.role == UserRole.BUSINESS_ADMIN -> {
-                        BackHandler { currentUser = null }
+                        BackHandler {
+                            SessionManager.clearUserSession(context)
+                            currentUser = null
+                        }
                         AdminMainScreen(
                             repository = repository,
                             businessId = currentUser?.businessId.orEmpty()
@@ -146,7 +160,10 @@ fun OrakleDukaanApp(
                     }
 
                     currentUser?.role == UserRole.EMPLOYEE -> {
-                        BackHandler { currentUser = null }
+                        BackHandler {
+                            SessionManager.clearUserSession(context)
+                            currentUser = null
+                        }
                         EmployeeMainScreen(
                             repository = repository,
                             employeeId = currentUser?.employeeId.orEmpty(),
@@ -155,7 +172,10 @@ fun OrakleDukaanApp(
                     }
 
                     else -> {
-                        BackHandler { currentUser = null }
+                        BackHandler {
+                            SessionManager.clearUserSession(context)
+                            currentUser = null
+                        }
                         SuperAdminScreen(repository = repository)
                     }
                 }

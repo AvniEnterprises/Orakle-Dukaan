@@ -125,30 +125,7 @@ fun SuperAdminScreen(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                isSyncing = true
-                                val res = repository.syncBusinessesFromSupabase()
-                                isSyncing = false
-                                if (res.isSuccess) {
-                                    Toast.makeText(context, "Synced ${res.getOrDefault(0)} live shops from Supabase", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, "Live sync failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }
-                    ) {
-                        if (isSyncing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = OrakleRedPrimary
-                            )
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = "Sync from Supabase")
-                        }
-                    }
+                    // Silent background synchronization active - no disruptive spinner icon
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )

@@ -563,6 +563,17 @@ class DukaanRepository(context: Context) {
             val isInsideGeofence = distanceMeters <= business.geofenceRadiusMeters
             val status = if (isInsideGeofence) "VERIFIED" else "OUTSIDE_GEOFENCE"
 
+            var finalPhotoUri = photoUri
+            if (!isOfflineMode && photoUri.isNotBlank() && !photoUri.startsWith("http") && !photoUri.startsWith("QR_PASS")) {
+                val localFile = java.io.File(photoUri)
+                if (localFile.exists()) {
+                    val bucketUrl = SupabaseClient.uploadAttendancePhotoToSupabase(businessId, employeeId, localFile)
+                    if (bucketUrl != null) {
+                        finalPhotoUri = bucketUrl
+                    }
+                }
+            }
+
             val eventEntity = AttendanceEventEntity(
                 id = UUID.randomUUID().toString(),
                 businessId = businessId,
@@ -575,7 +586,7 @@ class DukaanRepository(context: Context) {
                 longitude = userLng,
                 distanceFromShopMeters = distanceMeters,
                 isGeofenceValid = isInsideGeofence,
-                photoUri = photoUri,
+                photoUri = finalPhotoUri,
                 verificationMethod = method,
                 status = status,
                 isOffline = isOfflineMode,
@@ -598,10 +609,16 @@ class DukaanRepository(context: Context) {
                 }
             }
 
-            NotificationHelper.showNotification(
+            // Role-separated notifications: Employee only sees their own confirmation, Admin sees staff punch
+            NotificationHelper.showEmployeeNotification(
                 context = appContext,
                 title = "Duty ${eventType.name} Recorded",
-                message = "${employee.fullName}: Attendance punch ${eventType.name} saved at ${eventEntity.formattedTime} (${status.replace("_", " ")})"
+                message = "Your attendance punch ${eventType.name} was saved at ${eventEntity.formattedTime} (${status.replace("_", " ")})"
+            )
+            NotificationHelper.showAdminNotification(
+                context = appContext,
+                title = "Staff ${eventType.name}: ${employee.fullName}",
+                message = "${employee.fullName} punched ${eventType.name} at ${eventEntity.formattedTime} (${status.replace("_", " ")})"
             )
 
             Result.success(eventEntity.toModel())
@@ -679,10 +696,17 @@ class DukaanRepository(context: Context) {
         } catch (e: Exception) {
             Log.e("DukaanRepository", "applyLeave sync failed", e)
         }
-        NotificationHelper.showNotification(
+        // Targeted notifications: Employee gets confirmation, Admin gets the request
+        val empName = dao.getEmployeeById(leave.employeeId)?.fullName ?: "Staff Member"
+        NotificationHelper.showEmployeeNotification(
             context = appContext,
             title = "Leave Request Sent",
             message = "Applied for ${leave.leaveType} leave (${leave.startDate} to ${leave.endDate}, ${leave.days} days)."
+        )
+        NotificationHelper.showAdminNotification(
+            context = appContext,
+            title = "New Leave Request: $empName",
+            message = "$empName requested ${leave.days} day(s) of ${leave.leaveType} leave."
         )
     }
 
@@ -710,10 +734,15 @@ class DukaanRepository(context: Context) {
             } catch (e: Exception) {
                 Log.e("DukaanRepository", "updateLeaveStatus sync failed", e)
             }
-            NotificationHelper.showNotification(
+            NotificationHelper.showEmployeeNotification(
                 context = appContext,
                 title = "Leave Request ${status.name}",
-                message = "Leave application has been ${status.name.lowercase()}."
+                message = "Your leave application has been ${status.name.lowercase()} by Admin."
+            )
+            NotificationHelper.showAdminNotification(
+                context = appContext,
+                title = "Leave Status Updated",
+                message = "Marked leave application as ${status.name}."
             )
         }
     }
@@ -735,10 +764,15 @@ class DukaanRepository(context: Context) {
         } catch (e: Exception) {
             Log.e("DukaanRepository", "saveAdvance sync failed", e)
         }
-        NotificationHelper.showNotification(
+        NotificationHelper.showEmployeeNotification(
+            context = appContext,
+            title = "Udhaar / Advance Credited",
+            message = "Advance of ₹${advance.totalAmount.toInt()} has been issued to your account."
+        )
+        NotificationHelper.showAdminNotification(
             context = appContext,
             title = "Advance Issued",
-            message = "Advance / Udhaar of ₹${advance.totalAmount.toInt()} issued."
+            message = "Advance / Udhaar of ₹${advance.totalAmount.toInt()} recorded."
         )
         dao.insertAuditLog(
             AuditLogEntity(
@@ -862,6 +896,47 @@ class DukaanRepository(context: Context) {
 
     suspend fun sendSupportMessage(msg: SupportMessage) = withContext(Dispatchers.IO) {
         dao.insertSupportMessage(msg.toEntity())
+    }
+
+    suspend fun clearCompletedLeaves(businessId: String) = withContext(Dispatchers.IO) {
+        dao.clearCompletedLeaves(businessId)
+    }
+
+    suspend fun clearEmployeeCompletedLeaves(employeeId: String) = withContext(Dispatchers.IO) {
+        dao.clearEmployeeCompletedLeaves(employeeId)
+    }
+
+    suspend fun clearSupportMessages(businessId: String) = withContext(Dispatchers.IO) {
+        dao.clearSupportMessages(businessId)
+    }
+
+    suspend fun updateEmployeeAvatar(employeeId: String, imageFile: java.io.File): String? = withContext(Dispatchers.IO) {
+        val found = dao.getEmployeeById(employeeId) ?: return@withContext null
+        val remoteUrl = SupabaseClient.uploadAvatarToSupabase(employeeId, imageFile)
+        val finalUrl = remoteUrl ?: imageFile.absolutePath
+        val updated = found.copy(photoUrl = finalUrl)
+        dao.updateEmployee(updated)
+        try {
+            SupabaseClient.registerEmployeeInSupabase(updated, updated.password)
+        } catch (_: Exception) {}
+        finalUrl
+    }
+
+    suspend fun updateBusinessLogo(businessId: String, imageFile: java.io.File): String? = withContext(Dispatchers.IO) {
+        val found = dao.getBusinessById(businessId) ?: return@withContext null
+        val remoteUrl = SupabaseClient.uploadAvatarToSupabase(businessId, imageFile)
+        val finalUrl = remoteUrl ?: imageFile.absolutePath
+        val prefs = appContext.getSharedPreferences("dukaan_logos", Context.MODE_PRIVATE)
+        prefs.edit().putString("logo_$businessId", finalUrl).apply()
+        try {
+            SupabaseClient.updateShopInSupabase(found)
+        } catch (_: Exception) {}
+        finalUrl
+    }
+
+    fun getBusinessLogo(businessId: String): String? {
+        val prefs = appContext.getSharedPreferences("dukaan_logos", Context.MODE_PRIVATE)
+        return prefs.getString("logo_$businessId", null)
     }
 
     // --- Audit Logs ---

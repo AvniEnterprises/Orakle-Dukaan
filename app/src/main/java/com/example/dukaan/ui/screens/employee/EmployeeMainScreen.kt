@@ -2,8 +2,13 @@ package com.example.dukaan.ui.screens.employee
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -25,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.example.dukaan.data.model.*
 import com.example.dukaan.data.repository.DukaanRepository
 import com.example.dukaan.service.LocationHelper
+import com.example.dukaan.service.NotificationHelper
 import com.example.dukaan.service.RealCameraSelfieDialog
 import com.example.dukaan.service.RealQrScannerDialog
 import com.example.dukaan.service.ReportGenerator
@@ -35,6 +42,28 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+
+fun isBeforeShiftEnd(shiftEndStr: String?): Boolean {
+    if (shiftEndStr.isNullOrBlank()) return false
+    try {
+        val now = Calendar.getInstance()
+        val currentMinutes = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+        val endMinutes = if (shiftEndStr.contains("AM", ignoreCase = true) || shiftEndStr.contains("PM", ignoreCase = true)) {
+            val df = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
+            val d = df.parse(shiftEndStr.trim())
+            val c = Calendar.getInstance().apply { time = d }
+            c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)
+        } else {
+            val parts = shiftEndStr.trim().split(":")
+            val h = parts[0].trim().toInt()
+            val m = if (parts.size > 1) parts[1].trim().take(2).toInt() else 0
+            h * 60 + m
+        }
+        return currentMinutes < endMinutes
+    } catch (_: Exception) {
+        return false
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -135,6 +164,35 @@ fun EmployeeMainScreen(
     var selectedExpenseForEdit by remember { mutableStateOf<ExpenseRecord?>(null) }
     var showQrScannerDialog by remember { mutableStateOf(false) }
     var isPunching by remember { mutableStateOf(false) }
+    var showEarlyDutyEndDialog by remember { mutableStateOf(false) }
+    var isEarlyDutyEndPunch by remember { mutableStateOf(false) }
+
+    val profilePhotoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val bmp = android.graphics.BitmapFactory.decodeStream(inputStream)
+                    inputStream?.close()
+                    if (bmp != null) {
+                        val photosDir = java.io.File(context.filesDir, "employee_avatars").apply { mkdirs() }
+                        val file = java.io.File(photosDir, "avatar_${employeeId}.jpg")
+                        val fos = java.io.FileOutputStream(file)
+                        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, fos)
+                        fos.flush()
+                        fos.close()
+                        repository.updateEmployeeAvatar(employeeId, file)
+                        employee = repository.getEmployeeById(employeeId)
+                        Toast.makeText(context, "Profile picture updated successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Failed to upload photo: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     // Document and PDF state
     var showAddDocDialog by remember { mutableStateOf(false) }
@@ -369,8 +427,13 @@ fun EmployeeMainScreen(
 
                                 Button(
                                     onClick = {
-                                        pendingPunchType = AttendanceType.OUT
-                                        showCameraDialog = true
+                                        if (isBeforeShiftEnd(business?.shiftEnd)) {
+                                            showEarlyDutyEndDialog = true
+                                        } else {
+                                            isEarlyDutyEndPunch = false
+                                            pendingPunchType = AttendanceType.OUT
+                                            showCameraDialog = true
+                                        }
                                     },
                                     enabled = isCurrentlyWorking && !isPunching,
                                     colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary),
@@ -616,7 +679,27 @@ fun EmployeeMainScreen(
                         }
 
                         item {
-                            Text("MY LEAVE REQUESTS (${myLeaves.size})", fontWeight = FontWeight.Bold, color = OrakleSlate700, fontSize = 12.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("MY LEAVE REQUESTS (${myLeaves.size})", fontWeight = FontWeight.Bold, color = OrakleSlate700, fontSize = 12.sp)
+                                if (myLeaves.any { it.status != LeaveStatus.PENDING }) {
+                                    TextButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                repository.clearEmployeeCompletedLeaves(employeeId)
+                                                Toast.makeText(context, "Completed leave history cleared!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Clear Past Leaves", fontSize = 11.sp, color = OrakleRedPrimary)
+                                    }
+                                }
+                            }
                         }
 
                         items(myLeaves) { leave ->
@@ -701,22 +784,76 @@ fun EmployeeMainScreen(
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(employee?.fullName ?: "Staff", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                        val avatarBitmap = remember(employee?.photoUrl) {
+                                            try {
+                                                val p = employee?.photoUrl.orEmpty()
+                                                if (p.isNotBlank() && !p.startsWith("http")) {
+                                                    val f = java.io.File(p)
+                                                    if (f.exists()) android.graphics.BitmapFactory.decodeFile(f.absolutePath) else null
+                                                } else null
+                                            } catch (_: Exception) { null }
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .size(56.dp)
+                                                .clip(CircleShape)
+                                                .background(OrakleRedLight)
+                                                .border(2.dp, OrakleRedPrimary, CircleShape)
+                                                .clickable {
+                                                    profilePhotoPickerLauncher.launch(
+                                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                    )
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (avatarBitmap != null) {
+                                                Image(
+                                                    bitmap = avatarBitmap.asImageBitmap(),
+                                                    contentDescription = "Profile Photo",
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = (employee?.fullName?.take(1) ?: "S").uppercase(),
+                                                    fontSize = 22.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = OrakleRedPrimary
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(employee?.fullName ?: "Staff", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                            Text("${employee?.designation ?: "Staff"} • ${employee?.employeeCode}", fontSize = 12.sp, color = OrakleSlate600)
+                                            TextButton(
+                                                onClick = {
+                                                    profilePhotoPickerLauncher.launch(
+                                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                    )
+                                                },
+                                                contentPadding = PaddingValues(0.dp)
+                                            ) {
+                                                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(13.dp), tint = OrakleRedPrimary)
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Upload Photo", fontSize = 11.sp, color = OrakleRedPrimary)
+                                            }
+                                        }
                                         OutlinedButton(
                                             onClick = { showEditProfileDialog = true },
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                             shape = RoundedCornerShape(8.dp),
                                             modifier = Modifier.testTag("employee_edit_profile_button")
                                         ) {
-                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Edit Profile", fontSize = 12.sp)
+                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text("Edit", fontSize = 11.sp)
                                         }
                                     }
-                                    Text("Code: ${employee?.employeeCode} • Mobile: ${employee?.phone}", fontSize = 12.sp, color = OrakleSlate600)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Mobile: ${employee?.phone}", fontSize = 12.sp, color = OrakleSlate600)
                                     Text("Address: ${employee?.address}", fontSize = 12.sp, color = OrakleSlate500)
                                     Text("Emergency Contact: ${employee?.emergencyContact}", fontSize = 12.sp, color = OrakleSlate500)
                                     if (!employee?.bankAccount.isNullOrBlank()) {
@@ -896,6 +1033,13 @@ fun EmployeeMainScreen(
                     isPunching = false
                     pendingPunchType = null
                     if (result.isSuccess) {
+                        if (isEarlyDutyEndPunch) {
+                            NotificationHelper.showAdminNotification(
+                                context = context,
+                                title = "⚠️ Early Duty End Alert: ${employee?.fullName}",
+                                message = "${employee?.fullName} ended duty EARLY at ${SimpleDateFormat("hh:mm a", Locale.ENGLISH).format(Date())} before shift end (${business?.shiftEnd})."
+                            )
+                        }
                         val ev = result.getOrNull()!!
                         val msg = if (ev.isGeofenceValid) {
                             "Duty ${ev.eventType} recorded successfully at ${ev.formattedTime} with live selfie photo!"
@@ -918,13 +1062,37 @@ fun EmployeeMainScreen(
             onDismiss = { showQrScannerDialog = false },
             onQrScanned = { scannedCode ->
                 showQrScannerDialog = false
+                val bizCode = business?.businessCode.orEmpty()
+                val bizId = businessId
+                val isMatchingShop = (bizCode.isNotBlank() && scannedCode.contains(bizCode, ignoreCase = true)) ||
+                        (bizId.isNotBlank() && scannedCode.contains(bizId, ignoreCase = true)) ||
+                        scannedCode.contains("ORAKLE_DUKAAN", ignoreCase = true)
+
+                if (!isMatchingShop) {
+                    Toast.makeText(context, "QR Mismatch! This QR code does not belong to ${business?.name ?: "your shop"} ($bizCode).", Toast.LENGTH_LONG).show()
+                    return@RealQrScannerDialog
+                }
+
+                val detectedType = when {
+                    scannedCode.contains(":OUT", ignoreCase = true) || scannedCode.contains("CHECK OUT", ignoreCase = true) || scannedCode.contains("_OUT", ignoreCase = true) -> AttendanceType.OUT
+                    scannedCode.contains(":IN", ignoreCase = true) || scannedCode.contains("CHECK IN", ignoreCase = true) || scannedCode.contains("_IN", ignoreCase = true) -> AttendanceType.IN
+                    else -> if (isCurrentlyWorking) AttendanceType.OUT else AttendanceType.IN
+                }
+
+                if (detectedType == AttendanceType.OUT && isBeforeShiftEnd(business?.shiftEnd)) {
+                    NotificationHelper.showAdminNotification(
+                        context = context,
+                        title = "⚠️ Early Duty End Alert: ${employee?.fullName}",
+                        message = "${employee?.fullName} ended duty EARLY at ${SimpleDateFormat("hh:mm a", Locale.ENGLISH).format(Date())} before shift end (${business?.shiftEnd}) via QR Gate Pass."
+                    )
+                }
+
                 isPunching = true
                 coroutineScope.launch {
-                    val nextType = if (isCurrentlyWorking) AttendanceType.OUT else AttendanceType.IN
                     val res = repository.recordAttendancePunch(
                         businessId = businessId,
                         employeeId = employeeId,
-                        eventType = nextType,
+                        eventType = detectedType,
                         userLat = currentLat,
                         userLng = currentLng,
                         photoUri = "QR_PASS_${scannedCode.take(20)}",
@@ -933,10 +1101,44 @@ fun EmployeeMainScreen(
                     )
                     isPunching = false
                     if (res.isSuccess) {
-                        Toast.makeText(context, "QR Verified! Duty $nextType marked at ${res.getOrNull()?.formattedTime}.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "QR Verified! Duty $detectedType marked at ${res.getOrNull()?.formattedTime}.", Toast.LENGTH_LONG).show()
                     } else {
                         Toast.makeText(context, "Error: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
                     }
+                }
+            }
+        )
+    }
+
+    // Early Duty End Warning Dialog
+    if (showEarlyDutyEndDialog) {
+        AlertDialog(
+            onDismissRequest = { showEarlyDutyEndDialog = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = OrakleAmber) },
+            title = { Text("Early Duty End Warning", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "Your assigned shift ends at ${business?.shiftEnd ?: "shift end time"}. You are ending duty before your scheduled hours.\n\nAn alert will be sent immediately to the Shop Owner.",
+                    fontSize = 13.sp,
+                    color = OrakleSlate700
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showEarlyDutyEndDialog = false
+                        isEarlyDutyEndPunch = true
+                        pendingPunchType = AttendanceType.OUT
+                        showCameraDialog = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary)
+                ) {
+                    Text("Confirm Early Exit")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showEarlyDutyEndDialog = false }) {
+                    Text("Cancel")
                 }
             }
         )

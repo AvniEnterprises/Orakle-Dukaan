@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -271,9 +272,30 @@ fun RealCameraSelfieDialog(
                                 object : ImageCapture.OnImageSavedCallback {
                                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                                         isCapturing = false
-                                        val b = BitmapFactory.decodeFile(photoFile.absolutePath)
-                                        capturedBitmap = b
-                                        capturedFile = photoFile
+                                        try {
+                                            // Compress and optimize photo (< 80KB)
+                                            val original = BitmapFactory.decodeFile(photoFile.absolutePath)
+                                            if (original != null) {
+                                                val maxDim = 800
+                                                val w = original.width
+                                                val h = original.height
+                                                val scale = if (w > maxDim || h > maxDim) maxDim.toFloat() / maxOf(w, h) else 1.0f
+                                                val matrix = Matrix().apply { postScale(scale, scale) }
+                                                val scaled = Bitmap.createBitmap(original, 0, 0, w, h, matrix, true)
+                                                val fos = FileOutputStream(photoFile)
+                                                scaled.compress(Bitmap.CompressFormat.JPEG, 70, fos)
+                                                fos.flush()
+                                                fos.close()
+                                                capturedBitmap = scaled
+                                                capturedFile = photoFile
+                                            } else {
+                                                capturedBitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
+                                                capturedFile = photoFile
+                                            }
+                                        } catch (e: Exception) {
+                                            capturedBitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
+                                            capturedFile = photoFile
+                                        }
                                     }
 
                                     override fun onError(exc: ImageCaptureException) {
@@ -297,7 +319,7 @@ fun RealCameraSelfieDialog(
                         }
                     }
                 } else {
-                    // Preview Captured Image
+                    // Preview Captured Image with Rotate & Compression badge
                     Box(
                         modifier = Modifier
                             .size(240.dp)
@@ -312,6 +334,47 @@ fun RealCameraSelfieDialog(
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
+
+                        // Rotate 90 degrees Button
+                        IconButton(
+                            onClick = {
+                                capturedFile?.let { file ->
+                                    try {
+                                        val cur = capturedBitmap ?: BitmapFactory.decodeFile(file.absolutePath)
+                                        if (cur != null) {
+                                            val matrix = Matrix().apply { postRotate(90f) }
+                                            val rotated = Bitmap.createBitmap(cur, 0, 0, cur.width, cur.height, matrix, true)
+                                            val fos = FileOutputStream(file)
+                                            rotated.compress(Bitmap.CompressFormat.JPEG, 70, fos)
+                                            fos.flush()
+                                            fos.close()
+                                            capturedBitmap = rotated
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                            },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.RotateRight, contentDescription = "Rotate 90°", tint = Color.White)
+                        }
+                    }
+
+                    // Compression info badge
+                    val fileSizeKb = (capturedFile?.length() ?: 0L) / 1024
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = OrakleGreenContainer
+                    ) {
+                        Text(
+                            text = "✓ Compressed Photo: ${fileSizeKb} KB (Ready for live storage sync)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF166534),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
                     }
 
                     Row(

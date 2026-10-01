@@ -1559,4 +1559,100 @@ object SupabaseClient {
             Result.failure(e)
         }
     }
+
+    /**
+     * Uploads an attendance selfie photo to Supabase Storage bucket 'attendance_photos'.
+     * Returns the publicly accessible URL of the uploaded image, or null on failure.
+     */
+    suspend fun uploadAttendancePhotoToSupabase(businessId: String, employeeId: String, photoFile: java.io.File): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!photoFile.exists()) return@withContext null
+            val fileName = "selfie_${businessId}_${employeeId}_${System.currentTimeMillis()}.jpg"
+
+            // 1. Ensure bucket exists
+            val bucketReq = Request.Builder()
+                .url("$SUPABASE_URL/storage/v1/bucket")
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .addHeader("Content-Type", "application/json")
+                .post(JSONObject().apply {
+                    put("id", "attendance_photos")
+                    put("name", "attendance_photos")
+                    put("public", true)
+                }.toString().toRequestBody(jsonMediaType))
+                .build()
+            try {
+                httpClient.newCall(bucketReq).execute().close()
+            } catch (_: Exception) {}
+
+            // 2. Upload file bytes to Supabase Storage bucket
+            val bytes = photoFile.readBytes()
+            val uploadReq = Request.Builder()
+                .url("$SUPABASE_URL/storage/v1/object/attendance_photos/$fileName")
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .addHeader("Content-Type", "image/jpeg")
+                .post(bytes.toRequestBody("image/jpeg".toMediaType()))
+                .build()
+
+            val resp = httpClient.newCall(uploadReq).execute()
+            val isSuccess = resp.isSuccessful
+            resp.close()
+
+            if (isSuccess) {
+                val publicUrl = "$SUPABASE_URL/storage/v1/object/public/attendance_photos/$fileName"
+                Log.d(TAG, "Uploaded attendance selfie to Supabase bucket: $publicUrl")
+                return@withContext publicUrl
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Supabase storage bucket upload error: ${e.message}")
+        }
+        return@withContext null
+    }
+
+    /**
+     * Uploads an avatar/profile picture to Supabase Storage bucket 'avatars'.
+     */
+    suspend fun uploadAvatarToSupabase(userId: String, imageFile: java.io.File): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!imageFile.exists()) return@withContext null
+            val fileName = "avatar_${userId}_${System.currentTimeMillis()}.jpg"
+
+            val bucketReq = Request.Builder()
+                .url("$SUPABASE_URL/storage/v1/bucket")
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .addHeader("Content-Type", "application/json")
+                .post(JSONObject().apply {
+                    put("id", "avatars")
+                    put("name", "avatars")
+                    put("public", true)
+                }.toString().toRequestBody(jsonMediaType))
+                .build()
+            try {
+                httpClient.newCall(bucketReq).execute().close()
+            } catch (_: Exception) {}
+
+            val bytes = imageFile.readBytes()
+            val uploadReq = Request.Builder()
+                .url("$SUPABASE_URL/storage/v1/object/avatars/$fileName")
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .addHeader("Content-Type", "image/jpeg")
+                .post(bytes.toRequestBody("image/jpeg".toMediaType()))
+                .build()
+
+            val resp = httpClient.newCall(uploadReq).execute()
+            val isSuccess = resp.isSuccessful
+            resp.close()
+
+            if (isSuccess) {
+                val publicUrl = "$SUPABASE_URL/storage/v1/object/public/avatars/$fileName"
+                return@withContext publicUrl
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Supabase avatar upload error: ${e.message}")
+        }
+        return@withContext null
+    }
 }
