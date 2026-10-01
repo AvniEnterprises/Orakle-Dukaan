@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -19,10 +19,7 @@ import androidx.compose.ui.unit.sp
 import com.example.dukaan.data.model.Business
 import com.example.dukaan.data.repository.DukaanRepository
 import com.example.dukaan.ui.components.OrakleLogoBrand
-import com.example.ui.theme.OrakleRedPrimary
-import com.example.ui.theme.OrakleSlate500
-import com.example.ui.theme.OrakleSlate600
-import com.example.ui.theme.OrakleSlate700
+import com.example.ui.theme.*
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,6 +28,7 @@ fun BusinessRegisterScreen(
     repository: DukaanRepository,
     onBackToLogin: () -> Unit,
     onRegistered: (Business) -> Unit,
+    initialAgentCode: String = "",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -48,7 +46,7 @@ fun BusinessRegisterScreen(
     var pincode by remember { mutableStateOf("302001") }
     var geofenceRadius by remember { mutableStateOf("100") }
     var selectedPlan by remember { mutableStateOf("BASIC") }
-    var agentCode by remember { mutableStateOf("") }
+    var agentCode by remember { mutableStateOf(initialAgentCode) }
     var workingDays by remember { mutableStateOf("ALL_7_DAYS") }
     var isSubmitting by remember { mutableStateOf(false) }
     var showPendingApprovalDialog by remember { mutableStateOf<Business?>(null) }
@@ -148,6 +146,16 @@ fun BusinessRegisterScreen(
                     onValueChange = { agentCode = it.uppercase() },
                     label = { Text("Agent / Referral Code (Optional)") },
                     placeholder = { Text("e.g. AGT-1024") },
+                    trailingIcon = {
+                        if (agentCode.isNotBlank()) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = "Referral code applied", tint = OrakleGreen)
+                        }
+                    },
+                    supportingText = {
+                        if (agentCode.isNotBlank()) {
+                            Text("Referral code active • Onboarded via Field Partner", color = OrakleGreen, fontSize = 11.sp)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth().testTag("reg_agent_code")
                 )
             }

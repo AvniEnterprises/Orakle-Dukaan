@@ -270,6 +270,39 @@ class DukaanRepository(context: Context) {
                 timestamp = System.currentTimeMillis()
             )
         )
+
+        // If newly approved/activated and referred by an agent, record pending commission for this cycle
+        if (status == BusinessStatus.APPROVED || status == BusinessStatus.ACTIVE) {
+            if (existing.agentCode.isNotBlank()) {
+                val agent = dao.getAgentByCode(existing.agentCode)
+                if (agent != null) {
+                    val existingComms = dao.getAllCommissions().firstOrNull().orEmpty()
+                    val alreadyRecorded = existingComms.any { it.businessId == businessId }
+                    if (!alreadyRecorded && existing.monthlyPrice > 0) {
+                        val commAmount = existing.monthlyPrice * (agent.commissionPercent / 100.0)
+                        val comm = CommissionEntity(
+                            id = UUID.randomUUID().toString(),
+                            agentId = agent.id,
+                            businessId = existing.id,
+                            shopName = existing.name,
+                            subscriptionAmount = existing.monthlyPrice,
+                            commissionPercent = agent.commissionPercent,
+                            commissionAmount = commAmount,
+                            status = "PENDING",
+                            paymentDate = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date()),
+                            createdAt = System.currentTimeMillis()
+                        )
+                        dao.insertCommission(comm)
+                        NotificationHelper.showNotification(
+                            context = appContext,
+                            title = "Agent Commission Credited!",
+                            message = "Referred shop '${existing.name}' approved! ₹${commAmount.toInt()} commission added to your ledger.",
+                            targetRole = UserRole.AGENT
+                        )
+                    }
+                }
+            }
+        }
     }
 
     suspend fun updateBusinessPlanConfig(
@@ -971,14 +1004,17 @@ class DukaanRepository(context: Context) {
         name: String,
         phone: String,
         email: String,
-        commissionPercent: Double = 20.0
+        password: String = "123456",
+        commissionPercent: Double = 20.0,
+        customCode: String? = null
     ): Agent = withContext(Dispatchers.IO) {
-        val code = "AGT-${(1000..9999).random()}"
+        val code = if (!customCode.isNullOrBlank()) customCode.trim().uppercase() else "AGT-${(1000..9999).random()}"
         val agent = Agent(
             id = UUID.randomUUID().toString(),
             name = name.trim(),
             phone = phone.trim(),
             email = email.trim(),
+            password = password.ifBlank { "123456" },
             agentCode = code,
             commissionPercent = commissionPercent,
             status = "ACTIVE",

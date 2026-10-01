@@ -49,6 +49,7 @@ fun SuperAdminScreen(
     var selectedBusinessForStaff by remember { mutableStateOf<Business?>(null) }
     var showOnboardBusinessDialog by remember { mutableStateOf(false) }
     var showAddAgentDialog by remember { mutableStateOf(false) }
+    var selectedAgentForEdit by remember { mutableStateOf<Agent?>(null) }
 
     val businessTypes = listOf("All", "Kirana", "Clothing", "Restaurant", "Salon", "Medical", "Tailor", "Workshop", "Office")
 
@@ -472,18 +473,26 @@ fun SuperAdminScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text("Shops Referred: $referredCount • Total Earned: ₹${agent.earnings.toInt()}", fontSize = 11.sp, color = OrakleSlate600)
-                                            OutlinedButton(
-                                                onClick = {
-                                                    coroutineScope.launch {
-                                                        val newStatus = if (agent.status == "ACTIVE") "SUSPENDED" else "ACTIVE"
-                                                        repository.updateAgent(agent.copy(status = newStatus))
-                                                        Toast.makeText(context, "${agent.name} is now $newStatus", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                },
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                shape = RoundedCornerShape(6.dp)
-                                            ) {
-                                                Text(if (agent.status == "ACTIVE") "Suspend" else "Activate", fontSize = 11.sp)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                IconButton(
+                                                    onClick = { selectedAgentForEdit = agent },
+                                                    modifier = Modifier.size(32.dp).testTag("edit_agent_${agent.id}")
+                                                ) {
+                                                    Icon(Icons.Default.Edit, contentDescription = "Edit Agent", tint = OrakleSlate700, modifier = Modifier.size(16.dp))
+                                                }
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        coroutineScope.launch {
+                                                            val newStatus = if (agent.status == "ACTIVE") "SUSPENDED" else "ACTIVE"
+                                                            repository.updateAgent(agent.copy(status = newStatus))
+                                                            Toast.makeText(context, "${agent.name} is now $newStatus", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text(if (agent.status == "ACTIVE") "Suspend" else "Activate", fontSize = 11.sp)
+                                                }
                                             }
                                         }
                                     }
@@ -651,6 +660,57 @@ fun SuperAdminScreen(
                     repository.registerBusiness(newBiz)
                     showOnboardBusinessDialog = false
                     Toast.makeText(context, "Onboarded ${newBiz.name}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    if (showAddAgentDialog) {
+        AddEditAgentDialog(
+            agent = null,
+            onDismiss = { showAddAgentDialog = false },
+            onSave = { name, phone, email, pass, comm, code ->
+                coroutineScope.launch {
+                    val created = repository.createAgent(
+                        name = name,
+                        phone = phone,
+                        email = email,
+                        password = pass,
+                        commissionPercent = comm,
+                        customCode = code
+                    )
+                    showAddAgentDialog = false
+                    Toast.makeText(context, "Created Agent ${created.name} (${created.agentCode})", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    selectedAgentForEdit?.let { agentToEdit ->
+        AddEditAgentDialog(
+            agent = agentToEdit,
+            onDismiss = { selectedAgentForEdit = null },
+            onSave = { name, phone, email, pass, comm, code ->
+                coroutineScope.launch {
+                    repository.updateAgent(
+                        agentToEdit.copy(
+                            name = name,
+                            phone = phone,
+                            email = email,
+                            password = pass,
+                            commissionPercent = comm,
+                            agentCode = code
+                        )
+                    )
+                    selectedAgentForEdit = null
+                    Toast.makeText(context, "Updated Agent $name", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDelete = {
+                coroutineScope.launch {
+                    repository.deleteAgent(agentToEdit.id)
+                    selectedAgentForEdit = null
+                    Toast.makeText(context, "Deleted Agent ${agentToEdit.name}", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -1072,6 +1132,142 @@ fun SuperAdminStaffDialog(
                     repository.deleteEmployee(emp.id, business.id)
                     selectedEmployeeForEdit = null
                     Toast.makeText(context, "Staff member deleted", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun AddEditAgentDialog(
+    agent: Agent?,
+    onDismiss: () -> Unit,
+    onSave: (name: String, phone: String, email: String, pass: String, comm: Double, code: String) -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    var name by remember { mutableStateOf(agent?.name.orEmpty()) }
+    var phone by remember { mutableStateOf(agent?.phone.orEmpty()) }
+    var email by remember { mutableStateOf(agent?.email.orEmpty()) }
+    var password by remember { mutableStateOf(agent?.password ?: "123456") }
+    var commissionPercent by remember { mutableStateOf((agent?.commissionPercent ?: 20.0).toInt().toString()) }
+    var agentCode by remember { mutableStateOf(agent?.agentCode.orEmpty()) }
+    var errorText by remember { mutableStateOf("") }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (agent == null) "Add Field Agent / Partner" else "Edit Agent Details",
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (errorText.isNotBlank()) {
+                    Text(errorText, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Agent Full Name *") },
+                    modifier = Modifier.fillMaxWidth().testTag("add_agent_name_input")
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Phone Number (10 digits) *") },
+                    modifier = Modifier.fillMaxWidth().testTag("add_agent_phone_input")
+                )
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email Address (Optional)") },
+                    modifier = Modifier.fillMaxWidth().testTag("add_agent_email_input")
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Login Password *") },
+                    modifier = Modifier.fillMaxWidth().testTag("add_agent_password_input")
+                )
+                OutlinedTextField(
+                    value = commissionPercent,
+                    onValueChange = { commissionPercent = it },
+                    label = { Text("Commission Percentage (%)") },
+                    placeholder = { Text("e.g. 20") },
+                    modifier = Modifier.fillMaxWidth().testTag("add_agent_commission_input")
+                )
+                OutlinedTextField(
+                    value = agentCode,
+                    onValueChange = { agentCode = it.uppercase() },
+                    label = { Text("Referral Code (Auto-generated if empty)") },
+                    placeholder = { Text("e.g. AGT-1024") },
+                    modifier = Modifier.fillMaxWidth().testTag("add_agent_code_input")
+                )
+
+                if (agent != null && onDelete != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = { showDeleteConfirm = true },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = OrakleRedPrimary),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Delete Agent Account", fontSize = 12.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isBlank() || phone.isBlank()) {
+                        errorText = "Please enter Agent Name and Phone number"
+                        return@Button
+                    }
+                    val commVal = commissionPercent.toDoubleOrNull() ?: 20.0
+                    val finalCode = agentCode.ifBlank { agent?.agentCode ?: "AGT-${(1000..9999).random()}" }
+                    onSave(name.trim(), phone.trim(), email.trim(), password.trim(), commVal, finalCode.trim())
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary),
+                modifier = Modifier.testTag("save_agent_submit_button")
+            ) {
+                Text(if (agent == null) "Create Agent" else "Save Changes")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+
+    if (showDeleteConfirm && onDelete != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete Agent?", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to delete ${agent?.name}? Their referred shops will remain in the system.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
                 }
             }
         )

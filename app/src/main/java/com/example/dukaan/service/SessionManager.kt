@@ -13,6 +13,7 @@ object SessionManager {
     private const val KEY_NAME = "user_name"
     private const val KEY_BUSINESS_ID = "user_business_id"
     private const val KEY_EMPLOYEE_ID = "user_employee_id"
+    private const val KEY_AGENT_ID = "user_agent_id"
     private const val KEY_LOGIN_TIME = "login_time"
 
     // 12 Hours in milliseconds
@@ -30,6 +31,7 @@ object SessionManager {
         editor.putString(KEY_NAME, user.name)
         editor.putString(KEY_BUSINESS_ID, user.businessId)
         editor.putString(KEY_EMPLOYEE_ID, user.employeeId)
+        editor.putString(KEY_AGENT_ID, user.agentId)
         editor.putLong(KEY_LOGIN_TIME, System.currentTimeMillis())
         editor.apply()
 
@@ -57,7 +59,8 @@ object SessionManager {
                 email = prefs.getString(KEY_EMAIL, "") ?: "",
                 name = prefs.getString(KEY_NAME, "") ?: "",
                 businessId = prefs.getString(KEY_BUSINESS_ID, null),
-                employeeId = prefs.getString(KEY_EMPLOYEE_ID, null)
+                employeeId = prefs.getString(KEY_EMPLOYEE_ID, null),
+                agentId = prefs.getString(KEY_AGENT_ID, null)
             )
             NotificationHelper.setLoggedInRole(role)
             user

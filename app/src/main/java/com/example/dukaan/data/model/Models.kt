@@ -45,7 +45,8 @@ data class CurrentUser(
     val email: String,
     val name: String,
     val businessId: String? = null,
-    val employeeId: String? = null
+    val employeeId: String? = null,
+    val agentId: String? = null
 )
 
 data class Business(

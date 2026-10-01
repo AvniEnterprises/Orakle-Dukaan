@@ -41,6 +41,7 @@ fun LoginScreen(
     var emailOrPhone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var showAgentJoinDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -223,6 +224,33 @@ fun LoginScreen(
                                 return@launch
                             }
 
+                            // 3b. FIELD AGENT AUTHENTICATION (Real Database Check & Status Gate)
+                            val agent = repository.getAgentByContact(input) ?: repository.getAgentByCode(input)
+                            if (agent != null) {
+                                if (agent.password.isNotBlank() && agent.password != pass) {
+                                    isLoading = false
+                                    Toast.makeText(context, "Incorrect password for Agent ${agent.name}", Toast.LENGTH_SHORT).show()
+                                    return@launch
+                                }
+                                if (agent.status == "SUSPENDED") {
+                                    isLoading = false
+                                    Toast.makeText(context, "Agent account is SUSPENDED. Please contact Superadmin.", Toast.LENGTH_LONG).show()
+                                    return@launch
+                                }
+                                isLoading = false
+                                Toast.makeText(context, "Welcome Agent ${agent.name} (${agent.agentCode})", Toast.LENGTH_SHORT).show()
+                                onLoginSuccess(
+                                    CurrentUser(
+                                        id = agent.id,
+                                        role = UserRole.AGENT,
+                                        email = agent.email,
+                                        name = agent.name,
+                                        agentId = agent.id
+                                    )
+                                )
+                                return@launch
+                            }
+
                             // 4. REMOTE CLOUD AUTH VIA SUPABASE
                             if (input.contains("@")) {
                                 val supResult = SupabaseClient.signInWithEmail(input, pass)
@@ -272,6 +300,21 @@ fun LoginScreen(
                         modifier = Modifier.clickable { onOpenRegister() }.testTag("login_register_shop_link")
                     )
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Field Partner / Agent? ", fontSize = 12.sp, color = OrakleSlate600)
+                    Text(
+                        text = "Join as Agent",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0284C7),
+                        modifier = Modifier.clickable { showAgentJoinDialog = true }.testTag("login_join_agent_link")
+                    )
+                }
             }
         }
 
@@ -287,8 +330,122 @@ fun LoginScreen(
                 Text("Role Access Information:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = OrakleSlate700)
                 Text("• Shop Admin: Register your shop, wait for Superadmin activation, then log in", fontSize = 11.sp, color = OrakleSlate600)
                 Text("• Staff/Employee: Log in with mobile/email and password provided by shop admin", fontSize = 11.sp, color = OrakleSlate600)
+                Text("• Field Agent: Log in with Agent Code/Mobile/Email & Password to track referrals and commissions", fontSize = 11.sp, color = OrakleSlate600)
             }
         }
     }
+
+    if (showAgentJoinDialog) {
+        AgentJoinDialog(
+            onDismiss = { showAgentJoinDialog = false },
+            onRegister = { name, phone, email, pass ->
+                coroutineScope.launch {
+                    val created = repository.createAgent(
+                        name = name,
+                        phone = phone,
+                        email = email,
+                        password = pass,
+                        commissionPercent = 20.0
+                    )
+                    showAgentJoinDialog = false
+                    Toast.makeText(context, "Partner account created! Referral code: ${created.agentCode}", Toast.LENGTH_LONG).show()
+                    // Auto-fill and sign in
+                    emailOrPhone = created.phone
+                    password = pass
+                    onLoginSuccess(
+                        CurrentUser(
+                            id = created.id,
+                            role = UserRole.AGENT,
+                            email = created.email,
+                            name = created.name,
+                            agentId = created.id
+                        )
+                    )
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun AgentJoinDialog(
+    onDismiss: () -> Unit,
+    onRegister: (String, String, String, String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var errorText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("Join as Field Partner / Agent", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Earn 20% recurring monthly commission per shop referred", fontSize = 11.sp, color = Color(0xFF0284C7))
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                if (errorText.isNotBlank()) {
+                    Text(errorText, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Full Name *") },
+                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF0284C7)) },
+                    modifier = Modifier.fillMaxWidth().testTag("agent_join_name_input")
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Mobile Number (10 digits) *") },
+                    leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, tint = Color(0xFF0284C7)) },
+                    modifier = Modifier.fillMaxWidth().testTag("agent_join_phone_input")
+                )
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email Address (Optional)") },
+                    leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF0284C7)) },
+                    modifier = Modifier.fillMaxWidth().testTag("agent_join_email_input")
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password (Min 4 chars) *") },
+                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF0284C7)) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().testTag("agent_join_password_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isBlank() || phone.isBlank()) {
+                        errorText = "Please enter your name and mobile number"
+                        return@Button
+                    }
+                    if (password.length < 4) {
+                        errorText = "Password must be at least 4 characters"
+                        return@Button
+                    }
+                    onRegister(name.trim(), phone.trim(), email.trim(), password.trim())
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                modifier = Modifier.testTag("agent_join_submit_button")
+            ) {
+                Text("Join & Get Referral Code")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 

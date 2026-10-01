@@ -31,6 +31,7 @@ import com.example.dukaan.data.repository.DukaanRepository
 import com.example.dukaan.service.SessionManager
 import com.example.dukaan.ui.components.OrakleLogoBrand
 import com.example.dukaan.ui.screens.admin.AdminMainScreen
+import com.example.dukaan.ui.screens.agent.AgentMainScreen
 import com.example.dukaan.ui.screens.auth.BusinessRegisterScreen
 import com.example.dukaan.ui.screens.auth.LoginScreen
 import com.example.dukaan.ui.screens.employee.EmployeeMainScreen
@@ -98,6 +99,7 @@ fun OrakleDukaanApp(
     var currentUser by remember { mutableStateOf(SessionManager.getUserSession(context)) }
 
     var isRegisteringShop by remember { mutableStateOf(false) }
+    var prefilledAgentCode by remember { mutableStateOf("") }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -119,13 +121,21 @@ fun OrakleDukaanApp(
             Box(modifier = Modifier.weight(1f)) {
                 when {
                     isRegisteringShop -> {
-                        BackHandler { isRegisteringShop = false }
+                        BackHandler {
+                            isRegisteringShop = false
+                            prefilledAgentCode = ""
+                        }
                         BusinessRegisterScreen(
                             repository = repository,
-                            onBackToLogin = { isRegisteringShop = false },
+                            onBackToLogin = {
+                                isRegisteringShop = false
+                                prefilledAgentCode = ""
+                            },
                             onRegistered = { _ ->
                                 isRegisteringShop = false
-                            }
+                                prefilledAgentCode = ""
+                            },
+                            initialAgentCode = prefilledAgentCode
                         )
                     }
 
@@ -136,7 +146,10 @@ fun OrakleDukaanApp(
                                 SessionManager.saveUserSession(context, user)
                                 currentUser = user
                             },
-                            onOpenRegister = { isRegisteringShop = true }
+                            onOpenRegister = {
+                                prefilledAgentCode = ""
+                                isRegisteringShop = true
+                            }
                         )
                     }
 
@@ -168,6 +181,25 @@ fun OrakleDukaanApp(
                             repository = repository,
                             employeeId = currentUser?.employeeId.orEmpty(),
                             businessId = currentUser?.businessId.orEmpty()
+                        )
+                    }
+
+                    currentUser?.role == UserRole.AGENT -> {
+                        BackHandler {
+                            SessionManager.clearUserSession(context)
+                            currentUser = null
+                        }
+                        AgentMainScreen(
+                            repository = repository,
+                            agentId = currentUser?.agentId ?: currentUser?.id.orEmpty(),
+                            onRegisterShop = { code ->
+                                prefilledAgentCode = code
+                                isRegisteringShop = true
+                            },
+                            onLogout = {
+                                SessionManager.clearUserSession(context)
+                                currentUser = null
+                            }
                         )
                     }
 

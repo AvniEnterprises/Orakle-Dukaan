@@ -83,4 +83,8 @@ object NotificationHelper {
     fun showSuperAdminNotification(context: Context, title: String, message: String) {
         showNotification(context, title, message, targetRole = UserRole.SUPERADMIN)
     }
+
+    fun showAgentNotification(context: Context, title: String, message: String) {
+        showNotification(context, title, message, targetRole = UserRole.AGENT)
+    }
 }
