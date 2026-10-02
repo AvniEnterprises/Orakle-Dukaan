@@ -207,13 +207,13 @@ interface DukaanDao {
     @Query("SELECT * FROM agents WHERE id = :id")
     suspend fun getAgentById(id: String): AgentEntity?
 
-    @Query("SELECT * FROM agents WHERE agentCode = :code LIMIT 1")
+    @Query("SELECT * FROM agents WHERE UPPER(agentCode) = UPPER(:code) OR phone = :code OR LOWER(email) = LOWER(:code) OR id = :code LIMIT 1")
     suspend fun getAgentByCode(code: String): AgentEntity?
 
     @Query("SELECT * FROM agents")
     suspend fun getAllAgentsList(): List<AgentEntity>
 
-    @Query("SELECT * FROM agents WHERE phone = :contact OR LOWER(email) = LOWER(:contact) OR UPPER(agentCode) = UPPER(:contact) OR id = :contact LIMIT 1")
+    @Query("SELECT * FROM agents WHERE phone = :contact OR phone LIKE '%' || :contact || '%' OR LOWER(email) = LOWER(:contact) OR UPPER(agentCode) = UPPER(:contact) OR id = :contact LIMIT 1")
     suspend fun getAgentByContact(contact: String): AgentEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

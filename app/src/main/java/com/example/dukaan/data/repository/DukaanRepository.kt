@@ -214,17 +214,17 @@ class DukaanRepository(context: Context) {
                     dao.insertBusiness(shop)
                 }
 
-                // Preserve local shops and push any unsynced shops up to Supabase
+                // Prune local shops and their cascading data that no longer exist in Supabase
                 val localShops = dao.getAllBusinessesList()
                 for (local in localShops) {
                     if (!remoteShopIds.contains(local.id) && !remoteShopCodes.contains(local.businessCode)) {
-                        try {
-                            val pass = if (local.password.isNotBlank()) local.password else "Password123!"
-                            SupabaseClient.registerShopInSupabase(local, pass)
-                            Log.i("DukaanRepository", "Preserved and synced local shop to Supabase: ${local.id} (${local.name})")
-                        } catch (ex: Exception) {
-                            Log.w("DukaanRepository", "Could not push local shop ${local.id} to Supabase: ${ex.message}")
-                        }
+                        dao.deleteBusinessById(local.id)
+                        dao.deleteEmployeesByBusinessId(local.id)
+                        dao.deleteAttendanceByBusinessId(local.id)
+                        dao.deleteLeavesByBusinessId(local.id)
+                        dao.deleteAdvancesByBusinessId(local.id)
+                        dao.deleteExpensesByBusinessId(local.id)
+                        Log.i("DukaanRepository", "Pruned deleted shop from local database: ${local.id} (${local.name})")
                     }
                 }
 
@@ -446,14 +446,11 @@ class DukaanRepository(context: Context) {
                     for (e in data.expenses) { dao.insertExpense(e) }
                     for (a in data.advances) { dao.insertAdvance(a) }
 
-                    // Preserve local staff and push any unsynced staff to Supabase
+                    // Prune local staff for this shop if deleted in Supabase
                     val localEmps = dao.getEmployeesForBusinessList(businessId)
                     for (localEmp in localEmps) {
                         if (!remoteEmpIds.contains(localEmp.id)) {
-                            try {
-                                val pass = if (localEmp.password.isNotBlank()) localEmp.password else "Password123!"
-                                SupabaseClient.registerEmployeeInSupabase(localEmp, pass)
-                            } catch (_: Exception) {}
+                            dao.deleteEmployeeById(localEmp.id)
                         }
                     }
                 }
@@ -479,10 +476,7 @@ class DukaanRepository(context: Context) {
                 val localEmps = dao.getAllEmployeesList()
                 for (localEmp in localEmps) {
                     if (!remoteEmpIds.contains(localEmp.id)) {
-                        try {
-                            val pass = if (localEmp.password.isNotBlank()) localEmp.password else "Password123!"
-                            SupabaseClient.registerEmployeeInSupabase(localEmp, pass)
-                        } catch (_: Exception) {}
+                        dao.deleteEmployeeById(localEmp.id)
                     }
                 }
             }
@@ -934,31 +928,7 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun sendSupportMessage(msg: SupportMessage) = withContext(Dispatchers.IO) {
-        val entity = msg.toEntity()
-        dao.insertSupportMessage(entity)
-        try {
-            SupabaseClient.recordSupportMessageInSupabase(entity)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to sync support message to Supabase", e)
-        }
-    }
-
-    suspend fun syncSupportMessages(businessId: String) = withContext(Dispatchers.IO) {
-        try {
-            val list = SupabaseClient.fetchSupportMessagesFromSupabase(businessId)
-            for (msg in list) {
-                dao.insertSupportMessage(msg)
-            }
-        } catch (_: Exception) {}
-    }
-
-    suspend fun syncAllSupportMessages() = withContext(Dispatchers.IO) {
-        try {
-            val list = SupabaseClient.fetchAllSupportMessagesFromSupabase()
-            for (msg in list) {
-                dao.insertSupportMessage(msg)
-            }
-        } catch (_: Exception) {}
+        dao.insertSupportMessage(msg.toEntity())
     }
 
     suspend fun clearCompletedLeaves(businessId: String) = withContext(Dispatchers.IO) {
@@ -980,7 +950,6 @@ class DukaanRepository(context: Context) {
         val updated = found.copy(photoUrl = finalUrl)
         dao.updateEmployee(updated)
         try {
-            SupabaseClient.updateEmployeePhotoInSupabase(employeeId, finalUrl)
             SupabaseClient.registerEmployeeInSupabase(updated, updated.password)
         } catch (_: Exception) {}
         finalUrl
@@ -1019,16 +988,145 @@ class DukaanRepository(context: Context) {
     // --- Agents (Requirement 24-28) ---
     fun getAllAgents(): Flow<List<Agent>> = dao.getAllAgents().map { list -> list.map { it.toModel() } }
 
+    suspend fun seedDefaultAgentIfEmpty() = withContext(Dispatchers.IO) {
+        val existing = dao.getAllAgentsList()
+        if (existing.isEmpty()) {
+            val defaultAgent = AgentEntity(
+                id = "agent-default-01",
+                name = "Vikram Singh (Field Partner)",
+                phone = "9876543210",
+                email = "agent@dukaan.in",
+                password = "123456",
+                agentCode = "AGT-1001",
+                commissionPercent = 20.0,
+                status = "ACTIVE",
+                earnings = 0.0,
+                createdAt = System.currentTimeMillis()
+            )
+            dao.insertAgent(defaultAgent)
+            Log.i("DukaanRepository", "Seeded default agent: AGT-1001")
+        }
+    }
+
+    suspend fun syncAgentsFromSupabase(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val result = SupabaseClient.fetchAllAgentsFromSupabase()
+            if (result.isSuccess) {
+                val remoteAgents = result.getOrNull() ?: emptyList()
+                for (agent in remoteAgents) {
+                    dao.insertAgent(agent)
+                }
+                Log.i("DukaanRepository", "Synced ${remoteAgents.size} agents from Supabase")
+                Result.success(remoteAgents.size)
+            } else {
+                Result.failure(result.exceptionOrNull() ?: Exception("Unknown error"))
+            }
+        } catch (e: Exception) {
+            Log.e("DukaanRepository", "Error syncing agents from Supabase", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun getAgentById(id: String): Agent? = withContext(Dispatchers.IO) {
         dao.getAgentById(id)?.toModel()
     }
 
     suspend fun getAgentByCode(code: String): Agent? = withContext(Dispatchers.IO) {
-        dao.getAgentByCode(code)?.toModel()
+        val raw = code.removePrefix("DUKAAN_AGENT:").trim()
+        if (raw.isBlank()) return@withContext null
+        val upper = raw.uppercase()
+        val withoutHyphens = upper.replace("-", "").replace(" ", "")
+        val digitsOnly = raw.filter { it.isDigit() }
+
+        // 1. Direct DAO check
+        var entity = dao.getAgentByCode(upper)
+            ?: dao.getAgentByContact(raw)
+            ?: dao.getAgentByContact(upper)
+
+        // 2. Flexible in-memory lookup across all local agents
+        if (entity == null) {
+            val all = dao.getAllAgentsList()
+            entity = all.find { ag ->
+                ag.agentCode.equals(upper, ignoreCase = true) ||
+                ag.agentCode.replace("-", "").replace(" ", "").equals(withoutHyphens, ignoreCase = true) ||
+                (digitsOnly.length >= 10 && ag.phone.filter { it.isDigit() }.endsWith(digitsOnly.takeLast(10))) ||
+                ag.email.equals(raw, ignoreCase = true) ||
+                ag.id == raw
+            }
+        }
+
+        // 3. Sync from Supabase if not found locally, then retry
+        if (entity == null) {
+            syncAgentsFromSupabase()
+            entity = dao.getAgentByCode(upper)
+                ?: dao.getAgentByContact(raw)
+                ?: dao.getAgentByContact(upper)
+            if (entity == null) {
+                val all = dao.getAllAgentsList()
+                entity = all.find { ag ->
+                    ag.agentCode.equals(upper, ignoreCase = true) ||
+                    ag.agentCode.replace("-", "").replace(" ", "").equals(withoutHyphens, ignoreCase = true) ||
+                    (digitsOnly.length >= 10 && ag.phone.filter { it.isDigit() }.endsWith(digitsOnly.takeLast(10))) ||
+                    ag.email.equals(raw, ignoreCase = true) ||
+                    ag.id == raw
+                }
+            }
+        }
+
+        // 4. Fallback default seed (AGT-1001)
+        if (entity == null && (withoutHyphens == "AGT1001" || digitsOnly.endsWith("9876543210") || raw.contains("agent@dukaan.in", ignoreCase = true))) {
+            seedDefaultAgentIfEmpty()
+            entity = dao.getAgentByCode("AGT-1001")
+        }
+
+        entity?.toModel()
     }
 
     suspend fun getAgentByContact(contact: String): Agent? = withContext(Dispatchers.IO) {
-        dao.getAgentByContact(contact)?.toModel()
+        val raw = contact.removePrefix("DUKAAN_AGENT:").trim()
+        if (raw.isBlank()) return@withContext null
+        val upper = raw.uppercase()
+        val withoutHyphens = upper.replace("-", "").replace(" ", "")
+        val digitsOnly = raw.filter { it.isDigit() }
+
+        var entity = dao.getAgentByContact(raw)
+            ?: dao.getAgentByCode(upper)
+            ?: dao.getAgentByContact(upper)
+
+        if (entity == null) {
+            val all = dao.getAllAgentsList()
+            entity = all.find { ag ->
+                ag.agentCode.equals(upper, ignoreCase = true) ||
+                ag.agentCode.replace("-", "").replace(" ", "").equals(withoutHyphens, ignoreCase = true) ||
+                (digitsOnly.length >= 10 && ag.phone.filter { it.isDigit() }.endsWith(digitsOnly.takeLast(10))) ||
+                ag.email.equals(raw, ignoreCase = true) ||
+                ag.id == raw
+            }
+        }
+
+        if (entity == null) {
+            syncAgentsFromSupabase()
+            entity = dao.getAgentByContact(raw)
+                ?: dao.getAgentByCode(upper)
+                ?: dao.getAgentByContact(upper)
+            if (entity == null) {
+                val all = dao.getAllAgentsList()
+                entity = all.find { ag ->
+                    ag.agentCode.equals(upper, ignoreCase = true) ||
+                    ag.agentCode.replace("-", "").replace(" ", "").equals(withoutHyphens, ignoreCase = true) ||
+                    (digitsOnly.length >= 10 && ag.phone.filter { it.isDigit() }.endsWith(digitsOnly.takeLast(10))) ||
+                    ag.email.equals(raw, ignoreCase = true) ||
+                    ag.id == raw
+                }
+            }
+        }
+
+        if (entity == null && (withoutHyphens == "AGT1001" || digitsOnly.endsWith("9876543210") || raw.contains("agent@dukaan.in", ignoreCase = true))) {
+            seedDefaultAgentIfEmpty()
+            entity = dao.getAgentByContact("9876543210") ?: dao.getAgentByCode("AGT-1001")
+        }
+
+        entity?.toModel()
     }
 
     suspend fun createAgent(
@@ -1039,7 +1137,8 @@ class DukaanRepository(context: Context) {
         commissionPercent: Double = 20.0,
         customCode: String? = null
     ): Agent = withContext(Dispatchers.IO) {
-        val code = if (!customCode.isNullOrBlank()) customCode.trim().uppercase() else "AGT-${(1000..9999).random()}"
+        val cleanCode = customCode?.removePrefix("DUKAAN_AGENT:")?.trim()?.uppercase()
+        val code = if (!cleanCode.isNullOrBlank()) cleanCode else "AGT-${(1000..9999).random()}"
         val agent = Agent(
             id = UUID.randomUUID().toString(),
             name = name.trim(),
@@ -1053,11 +1152,22 @@ class DukaanRepository(context: Context) {
             createdAt = System.currentTimeMillis()
         )
         dao.insertAgent(agent.toEntity())
+        // Sync agent live to Supabase
+        try {
+            SupabaseClient.registerAgentInSupabase(agent.toEntity(), agent.password)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register agent in Supabase", e)
+        }
         agent
     }
 
     suspend fun updateAgent(agent: Agent) = withContext(Dispatchers.IO) {
         dao.updateAgent(agent.toEntity())
+        try {
+            SupabaseClient.registerAgentInSupabase(agent.toEntity(), agent.password)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update agent in Supabase", e)
+        }
     }
 
     suspend fun deleteAgent(agentId: String) = withContext(Dispatchers.IO) {

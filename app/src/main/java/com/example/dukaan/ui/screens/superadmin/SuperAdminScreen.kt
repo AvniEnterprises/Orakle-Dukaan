@@ -1,6 +1,7 @@
 package com.example.dukaan.ui.screens.superadmin
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dukaan.data.model.*
 import com.example.dukaan.data.repository.DukaanRepository
+import com.example.dukaan.service.InAppUpdateDialog
 import com.example.dukaan.ui.components.*
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
@@ -51,6 +53,7 @@ fun SuperAdminScreen(
     var showOnboardBusinessDialog by remember { mutableStateOf(false) }
     var showAddAgentDialog by remember { mutableStateOf(false) }
     var selectedAgentForEdit by remember { mutableStateOf<Agent?>(null) }
+    var showInAppUpdateDialog by remember { mutableStateOf(false) }
 
     val businessTypes = listOf("All", "Kirana", "Clothing", "Restaurant", "Salon", "Medical", "Tailor", "Workshop", "Office")
 
@@ -75,10 +78,12 @@ fun SuperAdminScreen(
 
     // Instant Live Auto-Refresh polling loop (Every 2.5 seconds in foreground)
     LaunchedEffect(Unit) {
+        repository.seedDefaultAgentIfEmpty()
         while (true) {
             isSyncing = true
             repository.syncBusinessesFromSupabase()
             repository.syncAllEmployeesFromSupabase()
+            repository.syncAgentsFromSupabase()
             isSyncing = false
             kotlinx.coroutines.delay(2500)
         }
@@ -127,7 +132,34 @@ fun SuperAdminScreen(
                     }
                 },
                 actions = {
-                    // Silent background synchronization active - no disruptive spinner icon
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = OrakleRedPrimary.copy(alpha = 0.1f),
+                        border = BorderStroke(1.dp, OrakleRedPrimary.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clickable { showInAppUpdateDialog = true }
+                            .testTag("superadmin_top_update_btn")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.SystemUpdate,
+                                contentDescription = "Check for App Updates",
+                                tint = OrakleRedPrimary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "App Update",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = OrakleRedPrimary
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
@@ -734,6 +766,12 @@ fun SuperAdminScreen(
                     Toast.makeText(context, "Deleted Agent ${agentToEdit.name}", Toast.LENGTH_SHORT).show()
                 }
             }
+        )
+    }
+
+    if (showInAppUpdateDialog) {
+        InAppUpdateDialog(
+            onDismiss = { showInAppUpdateDialog = false }
         )
     }
 }

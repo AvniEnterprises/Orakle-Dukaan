@@ -1,10 +1,13 @@
 package com.example.dukaan.ui.screens.auth
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -24,6 +27,7 @@ import com.example.dukaan.data.model.CurrentUser
 import com.example.dukaan.data.model.UserRole
 import com.example.dukaan.data.remote.SupabaseClient
 import com.example.dukaan.data.repository.DukaanRepository
+import com.example.dukaan.service.InAppUpdateDialog
 import com.example.dukaan.ui.components.OrakleLogoBrand
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
@@ -42,26 +46,64 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var showAgentJoinDialog by remember { mutableStateOf(false) }
+    var showInAppUpdateDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(24.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        OrakleLogoBrand()
-        Spacer(modifier = Modifier.height(10.dp))
+        // Top Header Bar with Logo and direct App Update Action
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OrakleLogoBrand()
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = OrakleRedPrimary.copy(alpha = 0.1f),
+                border = BorderStroke(1.dp, OrakleRedPrimary.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .clickable { showInAppUpdateDialog = true }
+                    .testTag("login_top_update_btn")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.SystemUpdate,
+                        contentDescription = "Update App APK",
+                        tint = OrakleRedPrimary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "App Update",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = OrakleRedPrimary
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = "Staff attendance aur daily employee management ka tension khatam.",
             style = MaterialTheme.typography.bodyMedium,
             color = OrakleSlate600,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
+            modifier = Modifier.padding(horizontal = 12.dp)
         )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // Card with Login Form
         Card(
@@ -83,7 +125,8 @@ fun LoginScreen(
                 OutlinedTextField(
                     value = emailOrPhone,
                     onValueChange = { emailOrPhone = it },
-                    label = { Text("Email or Mobile") },
+                    label = { Text("Email, Mobile or Agent Code") },
+                    placeholder = { Text("e.g. AGT-1001 or 9876543210") },
                     leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = OrakleRedPrimary) },
                     modifier = Modifier.fillMaxWidth().testTag("login_email_input")
                 )
@@ -92,6 +135,7 @@ fun LoginScreen(
                     value = password,
                     onValueChange = { password = it },
                     label = { Text("Password") },
+                    placeholder = { Text("Enter your password") },
                     leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = OrakleRedPrimary) },
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth().testTag("login_password_input")
@@ -225,7 +269,11 @@ fun LoginScreen(
                             }
 
                             // 3b. FIELD AGENT AUTHENTICATION (Real Database Check & Status Gate)
-                            val agent = repository.getAgentByContact(input) ?: repository.getAgentByCode(input)
+                            var agent = repository.getAgentByCode(input) ?: repository.getAgentByContact(input)
+                            if (agent == null) {
+                                repository.syncAgentsFromSupabase()
+                                agent = repository.getAgentByCode(input) ?: repository.getAgentByContact(input)
+                            }
                             if (agent != null) {
                                 if (agent.password.isNotBlank() && agent.password != pass) {
                                     isLoading = false
@@ -315,10 +363,88 @@ fun LoginScreen(
                         modifier = Modifier.clickable { showAgentJoinDialog = true }.testTag("login_join_agent_link")
                     )
                 }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Direct In-App Update Button on Login Screen
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = OrakleRedPrimary.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, OrakleRedPrimary.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth().testTag("login_card_update_btn")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showInAppUpdateDialog = true }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.SystemUpdate,
+                            contentDescription = "Check App Updates",
+                            tint = OrakleRedPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Check & Install App Updates (APK)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = OrakleRedPrimary
+                        )
+                    }
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Quick Role Login / Testing Helpers
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "Quick Demo / Role Login (Tap to fill):",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = OrakleSlate700
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            emailOrPhone = "AGT-1001"
+                            password = "123456"
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Field Agent", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0284C7))
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            emailOrPhone = "hypersmile100@gmail.com"
+                            password = "ProjectKnight@161718"
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Superadmin", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = OrakleRedPrimary)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Professional instructions card
         Card(
@@ -330,9 +456,15 @@ fun LoginScreen(
                 Text("Role Access Information:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = OrakleSlate700)
                 Text("• Shop Admin: Register your shop, wait for Superadmin activation, then log in", fontSize = 11.sp, color = OrakleSlate600)
                 Text("• Staff/Employee: Log in with mobile/email and password provided by shop admin", fontSize = 11.sp, color = OrakleSlate600)
-                Text("• Field Agent: Log in with Agent Code/Mobile/Email & Password to track referrals and commissions", fontSize = 11.sp, color = OrakleSlate600)
+                Text("• Field Agent: Log in with Agent Code (AGT-1001) or Mobile (9876543210) & Password 123456", fontSize = 11.sp, color = OrakleSlate600)
             }
         }
+    }
+
+    if (showInAppUpdateDialog) {
+        InAppUpdateDialog(
+            onDismiss = { showInAppUpdateDialog = false }
+        )
     }
 
     if (showAgentJoinDialog) {

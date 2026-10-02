@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -16,8 +17,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.dukaan.data.model.Agent
 import com.example.dukaan.data.model.Business
 import com.example.dukaan.data.repository.DukaanRepository
+import com.example.dukaan.service.RealQrScannerDialog
 import com.example.dukaan.ui.components.OrakleLogoBrand
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
@@ -46,10 +49,26 @@ fun BusinessRegisterScreen(
     var pincode by remember { mutableStateOf("302001") }
     var geofenceRadius by remember { mutableStateOf("100") }
     var selectedPlan by remember { mutableStateOf("BASIC") }
-    var agentCode by remember { mutableStateOf(initialAgentCode) }
+    var agentCode by remember(initialAgentCode) {
+        mutableStateOf(initialAgentCode.removePrefix("DUKAAN_AGENT:").trim())
+    }
+    var detectedAgent by remember { mutableStateOf<Agent?>(null) }
+    var isCheckingAgent by remember { mutableStateOf(false) }
+    var showAgentQrScanner by remember { mutableStateOf(false) }
     var workingDays by remember { mutableStateOf("ALL_7_DAYS") }
     var isSubmitting by remember { mutableStateOf(false) }
     var showPendingApprovalDialog by remember { mutableStateOf<Business?>(null) }
+
+    LaunchedEffect(agentCode) {
+        val clean = agentCode.removePrefix("DUKAAN_AGENT:").trim()
+        if (clean.isNotBlank()) {
+            isCheckingAgent = true
+            detectedAgent = repository.getAgentByCode(clean) ?: repository.getAgentByContact(clean)
+            isCheckingAgent = false
+        } else {
+            detectedAgent = null
+        }
+    }
 
     val businessTypes = listOf(
         "Kirana", "Clothing", "Restaurant", "Salon", "Medical",
@@ -143,21 +162,77 @@ fun BusinessRegisterScreen(
             item {
                 OutlinedTextField(
                     value = agentCode,
-                    onValueChange = { agentCode = it.uppercase() },
-                    label = { Text("Agent / Referral Code (Optional)") },
-                    placeholder = { Text("e.g. AGT-1024") },
-                    trailingIcon = {
-                        if (agentCode.isNotBlank()) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = "Referral code applied", tint = OrakleGreen)
-                        }
+                    onValueChange = { 
+                        agentCode = it.removePrefix("DUKAAN_AGENT:").trim()
                     },
-                    supportingText = {
-                        if (agentCode.isNotBlank()) {
-                            Text("Referral code active • Onboarded via Field Partner", color = OrakleGreen, fontSize = 11.sp)
+                    label = { Text("Agent / Referral Code or Phone (Optional)") },
+                    placeholder = { Text("e.g. AGT-1001 or 9876543210") },
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (isCheckingAgent) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(4.dp))
+                            } else if (detectedAgent != null) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = "Agent verified", tint = OrakleGreen)
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
+                            IconButton(onClick = { showAgentQrScanner = true }) {
+                                Icon(Icons.Default.QrCodeScanner, contentDescription = "Scan Agent QR", tint = Color(0xFF0284C7))
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxWidth().testTag("reg_agent_code")
                 )
+
+                if (detectedAgent != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFDCFCE7),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Verified, contentDescription = null, tint = OrakleGreen, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("✓ Agent Detected: ${detectedAgent!!.name}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF166534))
+                                Text("Code: ${detectedAgent!!.agentCode} • ${detectedAgent!!.phone} (Verified Field Partner)", fontSize = 11.sp, color = Color(0xFF15803D))
+                            }
+                        }
+                    }
+                } else if (agentCode.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFFEF3C7),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Agent '$agentCode' not verified yet. Code or mobile check karein.",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF92400E)
+                                )
+                            }
+                            TextButton(
+                                onClick = { agentCode = "AGT-1001" },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("Use AGT-1001", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OrakleRedPrimary)
+                            }
+                        }
+                    }
+                }
             }
 
             item {
@@ -337,6 +412,19 @@ fun BusinessRegisterScreen(
                 ) {
                     Text("OK, Go to Login")
                 }
+            }
+        )
+    }
+
+    if (showAgentQrScanner) {
+        RealQrScannerDialog(
+            expectedShopCode = "",
+            onDismiss = { showAgentQrScanner = false },
+            onQrScanned = { rawScanned ->
+                val clean = rawScanned.removePrefix("DUKAAN_AGENT:").trim().uppercase()
+                agentCode = clean
+                showAgentQrScanner = false
+                Toast.makeText(context, "Agent Code Scanned: $clean", Toast.LENGTH_SHORT).show()
             }
         )
     }

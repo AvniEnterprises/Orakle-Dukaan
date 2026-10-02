@@ -9,7 +9,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -29,6 +32,7 @@ import com.example.dukaan.data.model.CurrentUser
 import com.example.dukaan.data.model.UserRole
 import com.example.dukaan.data.repository.DukaanRepository
 import com.example.dukaan.service.SessionManager
+import com.example.dukaan.service.InAppUpdateDialog
 import com.example.dukaan.ui.components.OrakleLogoBrand
 import com.example.dukaan.ui.screens.admin.AdminMainScreen
 import com.example.dukaan.ui.screens.agent.AgentMainScreen
@@ -100,6 +104,12 @@ fun OrakleDukaanApp(
 
     var isRegisteringShop by remember { mutableStateOf(false) }
     var prefilledAgentCode by remember { mutableStateOf("") }
+    var showInAppUpdateDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        repository.seedDefaultAgentIfEmpty()
+        repository.syncAgentsFromSupabase()
+    }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -110,6 +120,7 @@ fun OrakleDukaanApp(
             currentUser?.let { user ->
                 TopAppRoleBar(
                     user = user,
+                    onOpenUpdate = { showInAppUpdateDialog = true },
                     onLogout = {
                         SessionManager.clearUserSession(context)
                         currentUser = null
@@ -214,11 +225,18 @@ fun OrakleDukaanApp(
             }
         }
     }
+
+    if (showInAppUpdateDialog) {
+        InAppUpdateDialog(
+            onDismiss = { showInAppUpdateDialog = false }
+        )
+    }
 }
 
 @Composable
 fun TopAppRoleBar(
     user: CurrentUser,
+    onOpenUpdate: () -> Unit,
     onLogout: () -> Unit
 ) {
     Surface(
@@ -235,7 +253,11 @@ fun TopAppRoleBar(
         ) {
             OrakleLogoBrand()
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = when (user.role) {
@@ -255,21 +277,54 @@ fun TopAppRoleBar(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(5.dp))
 
                 Text(
                     text = user.name,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // App Update Action Badge/Button (High visibility)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = OrakleRedPrimary.copy(alpha = 0.1f),
+                    border = BorderStroke(1.dp, OrakleRedPrimary.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .clickable { onOpenUpdate() }
+                        .testTag("app_update_button")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.SystemUpdate,
+                            contentDescription = "Check for App Updates",
+                            tint = OrakleRedPrimary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "Update",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = OrakleRedPrimary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
 
                 IconButton(
                     onClick = onLogout,

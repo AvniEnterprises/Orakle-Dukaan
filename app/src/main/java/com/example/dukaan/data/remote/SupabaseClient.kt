@@ -48,7 +48,6 @@ object SupabaseClient {
     private const val TAG = "SupabaseClient"
     const val SUPABASE_URL = "https://uzylcwkxlonqyjlhqpre.supabase.co"
     const val PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV6eWxjd2t4bG9ucXlqbGhxcHJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1OTM0NzEsImV4cCI6MjEwNjE2OTQ3MX0.9uSwgmibSCpzg-BENerdnKQXs1HzNk3OYpaEzMPM09I"
-    const val ANON_KEY = PUBLISHABLE_KEY
     const val SECRET_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV6eWxjd2t4bG9ucXlqbGhxcHJlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDU5MzQ3MSwiZXhwIjoyMTA2MTY5NDcxfQ.PXAglLBtwkkJWJXkae8Ycg52GkCraRiFX7mOhJEUMO8"
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -280,6 +279,124 @@ object SupabaseClient {
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.e(TAG, "fetchAllShopsFromSupabase exception", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetches all registered Field Agents from Supabase Auth user metadata.
+     */
+    suspend fun fetchAllAgentsFromSupabase(): Result<List<AgentEntity>> = withContext(Dispatchers.IO) {
+        try {
+            val allUsers = fetchAllRawUsersFromSupabase()
+            val list = mutableListOf<AgentEntity>()
+
+            for (userObj in allUsers) {
+                val userId = userObj.optString("id")
+                val email = userObj.optString("email")
+                val meta = userObj.optJSONObject("user_metadata") ?: JSONObject()
+                val role = meta.optString("role", "")
+
+                if (role.equals("AGENT", ignoreCase = true) || role.equals("FIELD_AGENT", ignoreCase = true) || meta.has("agent_code")) {
+                    val code = meta.optString("agent_code", "AGT-${userId.take(4).uppercase()}")
+                    val entity = AgentEntity(
+                        id = meta.optString("agent_id", userId),
+                        name = meta.optString("name", "Field Agent"),
+                        phone = meta.optString("phone", ""),
+                        email = email,
+                        password = meta.optString("password", "123456"),
+                        agentCode = code,
+                        commissionPercent = meta.optDouble("commission_percent", 20.0),
+                        status = meta.optString("status", "ACTIVE"),
+                        earnings = meta.optDouble("earnings", 0.0),
+                        createdAt = meta.optLong("created_at", System.currentTimeMillis())
+                    )
+                    list.add(entity)
+                }
+            }
+            Log.i(TAG, "Fetched ${list.size} agents live from Supabase")
+            Result.success(list)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.e(TAG, "fetchAllAgentsFromSupabase error", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Registers or updates a Field Agent in Supabase Auth metadata.
+     */
+    suspend fun registerAgentInSupabase(
+        agent: AgentEntity,
+        rawPassword: String = agent.password
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val cleanPhone = agent.phone.replace(Regex("[^0-9]"), "")
+            val userEmail = if (agent.email.isNotBlank() && agent.email.contains("@")) {
+                agent.email.trim().replace(" ", "")
+            } else if (cleanPhone.length >= 6) {
+                "agent_${cleanPhone}@dukaan.orakle.in"
+            } else {
+                "agent_${agent.agentCode.lowercase().replace(Regex("[^a-z0-9]"), "")}@dukaan.orakle.in"
+            }
+
+            val meta = JSONObject().apply {
+                put("role", "AGENT")
+                put("agent_id", agent.id)
+                put("agent_code", agent.agentCode)
+                put("name", agent.name)
+                put("phone", agent.phone)
+                put("email", userEmail)
+                put("password", rawPassword)
+                put("commission_percent", agent.commissionPercent)
+                put("status", agent.status)
+                put("earnings", agent.earnings)
+                put("created_at", agent.createdAt)
+            }
+
+            val bodyJson = JSONObject().apply {
+                put("email", userEmail)
+                put("password", rawPassword.ifBlank { "123456" }.trim())
+                put("email_confirm", true)
+                put("user_metadata", meta)
+            }
+
+            val request = Request.Builder()
+                .url("$SUPABASE_URL/auth/v1/admin/users")
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .addHeader("Content-Type", "application/json")
+                .post(bodyJson.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val resStr = response.body?.string().orEmpty()
+            if (response.isSuccessful) {
+                val json = JSONObject(resStr)
+                val id = json.optString("id", agent.id)
+                Result.success(id)
+            } else {
+                // If user exists, update their metadata
+                val findUser = findUserByEmail(userEmail)
+                if (findUser != null) {
+                    val updateBody = JSONObject().apply {
+                        put("user_metadata", meta)
+                    }
+                    val updateReq = Request.Builder()
+                        .url("$SUPABASE_URL/auth/v1/admin/users/${findUser.optString("id")}")
+                        .addHeader("apikey", SECRET_KEY)
+                        .addHeader("Authorization", "Bearer $SECRET_KEY")
+                        .addHeader("Content-Type", "application/json")
+                        .put(updateBody.toString().toRequestBody(jsonMediaType))
+                        .build()
+                    httpClient.newCall(updateReq).execute().close()
+                    Result.success(findUser.optString("id"))
+                } else {
+                    Result.failure(Exception("Failed to register agent in Supabase: $resStr"))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "registerAgentInSupabase error", e)
             Result.failure(e)
         }
     }
@@ -542,7 +659,6 @@ object SupabaseClient {
                 put("bank_ifsc", employee.bankIfsc)
                 put("emergency_contact", employee.emergencyContact)
                 put("status", employee.status)
-                put("photo_url", employee.photoUrl)
             }
 
             val bodyJson = JSONObject().apply {
@@ -1366,7 +1482,6 @@ object SupabaseClient {
                 put("bank_ifsc", employee.bankIfsc)
                 put("emergency_contact", employee.emergencyContact)
                 put("status", employee.status)
-                put("photo_url", employee.photoUrl)
             }
 
             var found = false
@@ -1394,30 +1509,6 @@ object SupabaseClient {
             httpClient.newCall(req).execute().close()
         } catch (e: Exception) {
             Log.e(TAG, "addOrUpdateEmployeeInShopMetadata error", e)
-        }
-    }
-
-    /**
-     * Updates an employee's photo URL directly in Supabase User Metadata.
-     */
-    suspend fun updateEmployeePhotoInSupabase(employeeId: String, photoUrl: String) = withContext(Dispatchers.IO) {
-        try {
-            val empUser = findSupabaseUserByEmployeeId(employeeId)
-            if (empUser != null) {
-                val empUserId = empUser.getString("id")
-                val meta = empUser.optJSONObject("user_metadata") ?: JSONObject()
-                meta.put("photo_url", photoUrl)
-                val req = Request.Builder()
-                    .url("$SUPABASE_URL/auth/v1/admin/users/$empUserId")
-                    .addHeader("apikey", SECRET_KEY)
-                    .addHeader("Authorization", "Bearer $SECRET_KEY")
-                    .addHeader("Content-Type", "application/json")
-                    .put(JSONObject().apply { put("user_metadata", meta) }.toString().toRequestBody(jsonMediaType))
-                    .build()
-                httpClient.newCall(req).execute().close()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "updateEmployeePhotoInSupabase error", e)
         }
     }
 
@@ -1696,122 +1787,5 @@ object SupabaseClient {
             Log.w(TAG, "Supabase avatar upload error: ${e.message}")
         }
         return@withContext null
-    }
-
-    /**
-     * Records a chat / support message in Supabase live under shop user metadata.
-     */
-    suspend fun recordSupportMessageInSupabase(msg: com.example.dukaan.data.local.SupportMessageEntity): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val user = findSupabaseUserByShopId(msg.businessId) ?: return@withContext Result.failure(Exception("Shop not found in Supabase"))
-            val userId = user.getString("id")
-            val currentMeta = user.optJSONObject("user_metadata") ?: JSONObject()
-            val list = currentMeta.optJSONArray("support_messages") ?: JSONArray()
-
-            val msgObj = JSONObject().apply {
-                put("id", msg.id)
-                put("business_id", msg.businessId)
-                put("sender_role", msg.senderRole)
-                put("sender_name", msg.senderName)
-                put("message", msg.message)
-                put("timestamp", msg.timestamp)
-                put("is_read", msg.isRead)
-            }
-
-            var found = false
-            for (i in 0 until list.length()) {
-                if (list.getJSONObject(i).optString("id") == msg.id) {
-                    list.put(i, msgObj)
-                    found = true
-                    break
-                }
-            }
-            if (!found) list.put(msgObj)
-
-            currentMeta.put("support_messages", list)
-
-            val url = "$SUPABASE_URL/auth/v1/admin/users/$userId"
-            val bodyJson = JSONObject().apply {
-                put("user_metadata", currentMeta)
-            }
-
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SECRET_KEY)
-                .addHeader("Authorization", "Bearer $SECRET_KEY")
-                .addHeader("Content-Type", "application/json")
-                .put(bodyJson.toString().toRequestBody(jsonMediaType))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val success = response.isSuccessful
-            response.close()
-            Result.success(success)
-        } catch (e: Exception) {
-            Log.e(TAG, "recordSupportMessageInSupabase error", e)
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Fetches live support messages for a shop from Supabase.
-     */
-    suspend fun fetchSupportMessagesFromSupabase(businessId: String): List<com.example.dukaan.data.local.SupportMessageEntity> = withContext(Dispatchers.IO) {
-        try {
-            val user = findSupabaseUserByShopId(businessId) ?: return@withContext emptyList()
-            val meta = user.optJSONObject("user_metadata") ?: return@withContext emptyList()
-            val list = meta.optJSONArray("support_messages") ?: return@withContext emptyList()
-
-            val results = mutableListOf<com.example.dukaan.data.local.SupportMessageEntity>()
-            for (i in 0 until list.length()) {
-                val o = list.getJSONObject(i)
-                results.add(
-                    com.example.dukaan.data.local.SupportMessageEntity(
-                        id = o.optString("id", UUID.randomUUID().toString()),
-                        businessId = o.optString("business_id", businessId),
-                        senderRole = o.optString("sender_role", "USER"),
-                        senderName = o.optString("sender_name", "Anonymous"),
-                        message = o.optString("message", ""),
-                        timestamp = o.optLong("timestamp", System.currentTimeMillis()),
-                        isRead = o.optBoolean("is_read", false)
-                    )
-                )
-            }
-            results
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    /**
-     * Fetches all live support messages across all shops for Superadmin.
-     */
-    suspend fun fetchAllSupportMessagesFromSupabase(): List<com.example.dukaan.data.local.SupportMessageEntity> = withContext(Dispatchers.IO) {
-        try {
-            val allUsers = fetchAllRawUsersFromSupabase()
-            val results = mutableListOf<com.example.dukaan.data.local.SupportMessageEntity>()
-            for (u in allUsers) {
-                val meta = u.optJSONObject("user_metadata") ?: continue
-                val list = meta.optJSONArray("support_messages") ?: continue
-                val bId = meta.optString("shop_id", meta.optString("business_id", u.optString("id", "")))
-                for (i in 0 until list.length()) {
-                    val o = list.getJSONObject(i)
-                    results.add(
-                        com.example.dukaan.data.local.SupportMessageEntity(
-                            id = o.optString("id", UUID.randomUUID().toString()),
-                            businessId = o.optString("business_id", bId),
-                            senderRole = o.optString("sender_role", "USER"),
-                            senderName = o.optString("sender_name", "Anonymous"),
-                            message = o.optString("message", ""),
-                            timestamp = o.optLong("timestamp", System.currentTimeMillis()),
-                            isRead = o.optBoolean("is_read", false)
-                        )
-                    )
-                }
-            }
-            results
-        } catch (_: Exception) {
-            emptyList()
-        }
     }
 }
