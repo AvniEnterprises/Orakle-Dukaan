@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dukaan.data.model.*
@@ -50,8 +51,6 @@ fun SuperAdminScreen(
     var showOnboardBusinessDialog by remember { mutableStateOf(false) }
     var showAddAgentDialog by remember { mutableStateOf(false) }
     var selectedAgentForEdit by remember { mutableStateOf<Agent?>(null) }
-    var showInAppUpdateDialog by remember { mutableStateOf(false) }
-    val allMessages by repository.getAllSupportMessages().collectAsState(initial = emptyList())
 
     val businessTypes = listOf("All", "Kirana", "Clothing", "Restaurant", "Salon", "Medical", "Tailor", "Workshop", "Office")
 
@@ -74,15 +73,14 @@ fun SuperAdminScreen(
 
     var isSyncing by remember { mutableStateOf(false) }
 
-    // Instant Live Auto-Refresh polling loop (Every 3 seconds in foreground)
+    // Instant Live Auto-Refresh polling loop (Every 2.5 seconds in foreground)
     LaunchedEffect(Unit) {
         while (true) {
             isSyncing = true
             repository.syncBusinessesFromSupabase()
             repository.syncAllEmployeesFromSupabase()
-            repository.syncAllSupportMessages()
             isSyncing = false
-            kotlinx.coroutines.delay(3000)
+            kotlinx.coroutines.delay(2500)
         }
     }
 
@@ -129,9 +127,7 @@ fun SuperAdminScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showInAppUpdateDialog = true }) {
-                        Icon(Icons.Default.SystemUpdate, contentDescription = "In-App Updates", tint = OrakleRedPrimary)
-                    }
+                    // Silent background synchronization active - no disruptive spinner icon
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
@@ -143,36 +139,32 @@ fun SuperAdminScreen(
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Navigation Tabs
-            TabRow(
+            // Navigation Tabs (Single-line Scrollable Tabs to prevent text glitches)
+            ScrollableTabRow(
                 selectedTabIndex = selectedTab,
+                edgePadding = 12.dp,
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = OrakleRedPrimary
             ) {
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("Shops (${businesses.size})") }
+                    text = { Text("Shops (${businesses.size})", maxLines = 1, softWrap = false, fontWeight = FontWeight.SemiBold) }
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("Plans & MRR") }
+                    text = { Text("Plans & MRR", maxLines = 1, softWrap = false, fontWeight = FontWeight.SemiBold) }
                 )
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    text = { Text("Agents (${agents.size})") }
+                    text = { Text("Agents (${agents.size})", maxLines = 1, softWrap = false, fontWeight = FontWeight.SemiBold) }
                 )
                 Tab(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
-                    text = { Text("Audit Logs", maxLines = 1) }
-                )
-                Tab(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
-                    text = { Text("Chat (${allMessages.size})", maxLines = 1) }
+                    text = { Text("Audit Logs", maxLines = 1, softWrap = false, fontWeight = FontWeight.SemiBold) }
                 )
             }
 
@@ -219,27 +211,35 @@ fun SuperAdminScreen(
                                 color = OrakleSlate600,
                                 modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilterChip(
-                                    selected = selectedStatusFilter == "All",
-                                    onClick = { selectedStatusFilter = "All" },
-                                    label = { Text("All (${businesses.size})") }
-                                )
-                                FilterChip(
-                                    selected = selectedStatusFilter == "Pending",
-                                    onClick = { selectedStatusFilter = "Pending" },
-                                    label = { Text("Pending (${totalPending})") }
-                                )
-                                FilterChip(
-                                    selected = selectedStatusFilter == "Active",
-                                    onClick = { selectedStatusFilter = "Active" },
-                                    label = { Text("Active (${totalActive})") }
-                                )
-                                FilterChip(
-                                    selected = selectedStatusFilter == "Disabled",
-                                    onClick = { selectedStatusFilter = "Disabled" },
-                                    label = { Text("Disabled (${totalSuspended})") }
-                                )
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                item {
+                                    FilterChip(
+                                        selected = selectedStatusFilter == "All",
+                                        onClick = { selectedStatusFilter = "All" },
+                                        label = { Text("All (${businesses.size})", maxLines = 1, softWrap = false) }
+                                    )
+                                }
+                                item {
+                                    FilterChip(
+                                        selected = selectedStatusFilter == "Pending",
+                                        onClick = { selectedStatusFilter = "Pending" },
+                                        label = { Text("Pending (${totalPending})", maxLines = 1, softWrap = false) }
+                                    )
+                                }
+                                item {
+                                    FilterChip(
+                                        selected = selectedStatusFilter == "Active",
+                                        onClick = { selectedStatusFilter = "Active" },
+                                        label = { Text("Active (${totalActive})", maxLines = 1, softWrap = false) }
+                                    )
+                                }
+                                item {
+                                    FilterChip(
+                                        selected = selectedStatusFilter == "Disabled",
+                                        onClick = { selectedStatusFilter = "Disabled" },
+                                        label = { Text("Disabled (${totalSuspended})", maxLines = 1, softWrap = false) }
+                                    )
+                                }
                             }
                         }
 
@@ -380,15 +380,26 @@ fun SuperAdminScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("FIELD AGENTS & REFERRALS", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Text(
+                                    text = "Field Agents",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Button(
                                     onClick = { showAddAgentDialog = true },
                                     colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                    modifier = Modifier.wrapContentWidth()
                                 ) {
                                     Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Add Agent", fontSize = 12.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Add Agent", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
                             }
                         }
@@ -606,151 +617,6 @@ fun SuperAdminScreen(
                         }
                     }
                 }
-
-                4 -> {
-                    // TAB 4: Live Helpdesk & Support Chat with All Shops
-                    var selectedChatBusinessId by remember { mutableStateOf<String?>(businesses.firstOrNull()?.id) }
-                    var adminReplyText by remember { mutableStateOf("") }
-                    val currentChatBiz = businesses.find { it.id == selectedChatBusinessId }
-                    val chatMessages = if (selectedChatBusinessId != null) {
-                        allMessages.filter { it.businessId == selectedChatBusinessId }
-                    } else allMessages
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
-                    ) {
-                        Text("SHOP HELPDESK & SUPPORT MESSAGES", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = OrakleSlate700)
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        // Shop selector chips
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(businesses) { b ->
-                                val unreadForBiz = allMessages.count { it.businessId == b.id && it.senderRole != "SUPERADMIN" }
-                                FilterChip(
-                                    selected = selectedChatBusinessId == b.id,
-                                    onClick = { selectedChatBusinessId = b.id },
-                                    label = {
-                                        Text("${b.name} (${unreadForBiz})", fontSize = 11.sp, maxLines = 1)
-                                    }
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = OrakleSlate100,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Storefront, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (currentChatBiz != null) "Chatting with: ${currentChatBiz.name} (${currentChatBiz.ownerName})" else "Select a shop to chat",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = OrakleSlate800,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        LazyColumn(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (chatMessages.isEmpty()) {
-                                item {
-                                    Box(
-                                        modifier = Modifier.fillMaxWidth().padding(32.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, tint = OrakleSlate400, modifier = Modifier.size(36.dp))
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            Text("No messages in this chat yet.", fontSize = 12.sp, color = OrakleSlate500)
-                                        }
-                                    }
-                                }
-                            } else {
-                                items(chatMessages) { msg ->
-                                    val isSuperAdmin = msg.senderRole == "SUPERADMIN"
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalAlignment = if (isSuperAdmin) Alignment.End else Alignment.Start
-                                    ) {
-                                        Surface(
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = if (isSuperAdmin) OrakleRedPrimary else OrakleSlate200
-                                        ) {
-                                            Column(modifier = Modifier.padding(10.dp)) {
-                                                Text(
-                                                    text = "${msg.senderName} (${msg.senderRole})",
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = if (isSuperAdmin) Color.White.copy(alpha = 0.85f) else OrakleSlate600
-                                                )
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(
-                                                    text = msg.message,
-                                                    fontSize = 13.sp,
-                                                    color = if (isSuperAdmin) Color.White else OrakleSlate900
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = adminReplyText,
-                                onValueChange = { adminReplyText = it },
-                                placeholder = { Text("Reply as Superadmin...", fontSize = 12.sp) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            IconButton(
-                                onClick = {
-                                    val targetBizId = selectedChatBusinessId ?: businesses.firstOrNull()?.id
-                                    if (adminReplyText.isNotBlank() && targetBizId != null) {
-                                        coroutineScope.launch {
-                                            repository.sendSupportMessage(
-                                                SupportMessage(
-                                                    id = UUID.randomUUID().toString(),
-                                                    businessId = targetBizId,
-                                                    senderRole = "SUPERADMIN",
-                                                    senderName = "SuperAdmin Support",
-                                                    message = adminReplyText.trim()
-                                                )
-                                            )
-                                            adminReplyText = ""
-                                            Toast.makeText(context, "Reply sent to shop!", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                                enabled = adminReplyText.isNotBlank()
-                            ) {
-                                Icon(Icons.Default.Send, contentDescription = "Send", tint = OrakleRedPrimary)
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -870,12 +736,6 @@ fun SuperAdminScreen(
             }
         )
     }
-
-    if (showInAppUpdateDialog) {
-        com.example.dukaan.service.InAppUpdateDialog(
-            onDismiss = { showInAppUpdateDialog = false }
-        )
-    }
 }
 
 @Composable
@@ -965,48 +825,48 @@ fun BusinessSuperadminCard(
                         onClick = onToggleStatus,
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = OrakleAmber),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
                         modifier = Modifier.weight(1f).testTag("disable_biz_${business.businessCode}")
                     ) {
                         Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(13.dp))
                         Spacer(modifier = Modifier.width(3.dp))
-                        Text("Disable", fontSize = 11.sp)
+                        Text("Disable", fontSize = 11.sp, maxLines = 1, softWrap = false)
                     }
                 } else {
                     Button(
                         onClick = onToggleStatus,
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = OrakleGreen),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
                         modifier = Modifier.weight(1f).testTag("activate_biz_${business.businessCode}")
                     ) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(13.dp))
                         Spacer(modifier = Modifier.width(3.dp))
-                        Text(if (business.status == BusinessStatus.PENDING) "Approve" else "Activate", fontSize = 11.sp)
+                        Text(if (business.status == BusinessStatus.PENDING) "Approve" else "Activate", fontSize = 10.sp, maxLines = 1, softWrap = false)
                     }
                 }
 
                 OutlinedButton(
                     onClick = onManageStaffClick,
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
                     modifier = Modifier.weight(1f).testTag("staff_biz_${business.businessCode}")
                 ) {
                     Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(13.dp))
                     Spacer(modifier = Modifier.width(3.dp))
-                    Text("Staff", fontSize = 11.sp)
+                    Text("Staff", fontSize = 11.sp, maxLines = 1, softWrap = false)
                 }
 
                 Button(
                     onClick = onManageClick,
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = OrakleSlate900),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
                     modifier = Modifier.weight(1f).testTag("manage_biz_${business.businessCode}")
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
                     Spacer(modifier = Modifier.width(3.dp))
-                    Text("Edit", fontSize = 11.sp)
+                    Text("Edit", fontSize = 11.sp, maxLines = 1, softWrap = false)
                 }
             }
         }

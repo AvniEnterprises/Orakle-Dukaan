@@ -143,7 +143,7 @@ fun AgentMainScreen(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
                     icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
-                    label = { Text("Dashboard", fontSize = 11.sp) },
+                    label = { Text("Dashboard", fontSize = 11.sp, maxLines = 1, softWrap = false) },
                     modifier = Modifier.testTag("agent_nav_dashboard")
                 )
                 NavigationBarItem(
@@ -160,21 +160,21 @@ fun AgentMainScreen(
                             Icon(Icons.Default.Store, contentDescription = "Shops")
                         }
                     },
-                    label = { Text("Shops", fontSize = 11.sp) },
+                    label = { Text("Shops", fontSize = 11.sp, maxLines = 1, softWrap = false) },
                     modifier = Modifier.testTag("agent_nav_shops")
                 )
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
                     icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Commissions") },
-                    label = { Text("Commissions", fontSize = 11.sp) },
+                    label = { Text("Commissions", fontSize = 10.sp, maxLines = 1, softWrap = false) },
                     modifier = Modifier.testTag("agent_nav_commissions")
                 )
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.AccountBalance, contentDescription = "Payouts") },
-                    label = { Text("Payouts", fontSize = 11.sp) },
+                    label = { Text("Payouts", fontSize = 11.sp, maxLines = 1, softWrap = false) },
                     modifier = Modifier.testTag("agent_nav_payouts")
                 )
             }

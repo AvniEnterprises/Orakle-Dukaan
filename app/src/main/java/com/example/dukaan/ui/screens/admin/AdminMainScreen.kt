@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -59,7 +60,6 @@ fun AdminMainScreen(
         while (isActive) {
             try {
                 repository.syncEmployeesAndAttendanceFromSupabase(businessId)
-                repository.syncSupportMessages(businessId)
                 val updated = repository.getBusinessById(businessId)
                 if (updated != null) {
                     business = updated
@@ -80,14 +80,7 @@ fun AdminMainScreen(
     val supportMessages by repository.getSupportMessages(businessId).collectAsState(initial = emptyList())
 
     var selectedNavTab by remember { mutableStateOf(0) } // 0: Dashboard, 1: Staff, 2: Attendance, 3: Money/Udhaar, 4: More
-    var moreSection by remember { mutableStateOf("MENU") } // "MENU", "LEAVES", "DOCUMENTS", "SUPPORT", "REPORTS"
-    BackHandler(enabled = selectedNavTab != 0 || moreSection != "MENU") {
-        if (moreSection != "MENU") {
-            moreSection = "MENU"
-        } else {
-            selectedNavTab = 0
-        }
-    }
+    BackHandler(enabled = selectedNavTab != 0) { selectedNavTab = 0 }
 
     var showAddEmployeeDialog by remember { mutableStateOf(false) }
     var showIssueAdvanceDialog by remember { mutableStateOf(false) }
@@ -104,7 +97,6 @@ fun AdminMainScreen(
     var showPdfActionsDialog by remember { mutableStateOf(false) }
     var showReportChoiceDialog by remember { mutableStateOf(false) }
     var previewingPhotoUrl by remember { mutableStateOf<String?>(null) }
-    var showInAppUpdateDialog by remember { mutableStateOf(false) }
 
     val logoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -174,31 +166,31 @@ fun AdminMainScreen(
                     selected = selectedNavTab == 0,
                     onClick = { selectedNavTab = 0 },
                     icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") },
-                    label = { Text("Home", fontSize = 11.sp) }
+                    label = { Text("Home", fontSize = 11.sp, maxLines = 1, softWrap = false) }
                 )
                 NavigationBarItem(
                     selected = selectedNavTab == 1,
                     onClick = { selectedNavTab = 1 },
                     icon = { Icon(Icons.Default.People, contentDescription = "Staff") },
-                    label = { Text("Staff", fontSize = 11.sp) }
+                    label = { Text("Staff", fontSize = 11.sp, maxLines = 1, softWrap = false) }
                 )
                 NavigationBarItem(
                     selected = selectedNavTab == 2,
                     onClick = { selectedNavTab = 2 },
                     icon = { Icon(Icons.Default.FactCheck, contentDescription = "Attendance") },
-                    label = { Text("Attendance", fontSize = 11.sp) }
+                    label = { Text("Attendance", fontSize = 10.sp, maxLines = 1, softWrap = false) }
                 )
                 NavigationBarItem(
                     selected = selectedNavTab == 3,
                     onClick = { selectedNavTab = 3 },
                     icon = { Icon(Icons.Default.CurrencyRupee, contentDescription = "Money") },
-                    label = { Text("Payroll", fontSize = 11.sp) }
+                    label = { Text("Payroll", fontSize = 11.sp, maxLines = 1, softWrap = false) }
                 )
                 NavigationBarItem(
                     selected = selectedNavTab == 4,
                     onClick = { selectedNavTab = 4 },
                     icon = { Icon(Icons.Default.Menu, contentDescription = "More") },
-                    label = { Text("More", fontSize = 11.sp) }
+                    label = { Text("More", fontSize = 11.sp, maxLines = 1, softWrap = false) }
                 )
             }
         },
@@ -300,7 +292,7 @@ fun AdminMainScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 QuickActionButton(
                                     title = "+ Employee",
@@ -309,7 +301,7 @@ fun AdminMainScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 QuickActionButton(
-                                    title = "Udhaar",
+                                    title = "Issue Udhaar",
                                     icon = Icons.Default.AccountBalanceWallet,
                                     onClick = { showIssueAdvanceDialog = true },
                                     modifier = Modifier.weight(1f)
@@ -324,15 +316,6 @@ fun AdminMainScreen(
                                             showPdfActionsDialog = true
                                             Toast.makeText(context, "Generated: ${file.name}", Toast.LENGTH_LONG).show()
                                         }
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                QuickActionButton(
-                                    title = "Chat (${supportMessages.size})",
-                                    icon = Icons.Default.Chat,
-                                    onClick = {
-                                        selectedNavTab = 4
-                                        moreSection = "SUPPORT"
                                     },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -471,14 +454,15 @@ fun AdminMainScreen(
                     // TAB 3: MONEY / PAYROLL / UDHAAR / EXPENSES
                     var payrollSubTab by remember { mutableStateOf(0) } // 0: Salary, 1: Udhaar Ledger, 2: Expenses
                     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                        TabRow(
+                        ScrollableTabRow(
                             selectedTabIndex = payrollSubTab,
+                            edgePadding = 8.dp,
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = OrakleRedPrimary
                         ) {
-                            Tab(selected = payrollSubTab == 0, onClick = { payrollSubTab = 0 }, text = { Text("Salary") })
-                            Tab(selected = payrollSubTab == 1, onClick = { payrollSubTab = 1 }, text = { Text("Udhaar / Advance") })
-                            Tab(selected = payrollSubTab == 2, onClick = { payrollSubTab = 2 }, text = { Text("Expenses (${expenses.size})") })
+                            Tab(selected = payrollSubTab == 0, onClick = { payrollSubTab = 0 }, text = { Text("Salary", maxLines = 1, softWrap = false) })
+                            Tab(selected = payrollSubTab == 1, onClick = { payrollSubTab = 1 }, text = { Text("Udhaar / Advance", maxLines = 1, softWrap = false) })
+                            Tab(selected = payrollSubTab == 2, onClick = { payrollSubTab = 2 }, text = { Text("Expenses (${expenses.size})", maxLines = 1, softWrap = false) })
                         }
                         Spacer(modifier = Modifier.height(12.dp))
 
@@ -492,7 +476,16 @@ fun AdminMainScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("MONTHLY SALARY CALCULATION", fontWeight = FontWeight.Bold, color = OrakleSlate700, fontSize = 12.sp)
+                                            Text(
+                                                text = "MONTHLY SALARY",
+                                                fontWeight = FontWeight.Bold,
+                                                color = OrakleSlate700,
+                                                fontSize = 12.sp,
+                                                modifier = Modifier.weight(1f, fill = false),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             Button(
                                                 onClick = {
                                                     business?.let { b ->
@@ -503,11 +496,12 @@ fun AdminMainScreen(
                                                     }
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = OrakleSlate900),
-                                                shape = RoundedCornerShape(8.dp)
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                             ) {
                                                 Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(14.dp))
                                                 Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Salary PDF", fontSize = 11.sp)
+                                                Text("Salary PDF", fontSize = 11.sp, maxLines = 1, softWrap = false)
                                             }
                                         }
                                     }
@@ -679,6 +673,8 @@ fun AdminMainScreen(
 
                 4 -> {
                     // TAB 4: MORE / LEAVES / DOCUMENTS / SUPPORT CHAT / REPORTS
+                    var moreSection by remember { mutableStateOf("MENU") } // "MENU", "LEAVES", "DOCUMENTS", "SUPPORT", "REPORTS"
+
                     when (moreSection) {
                         "MENU" -> {
                             LazyColumn(
@@ -736,14 +732,6 @@ fun AdminMainScreen(
                                         subtitle = "Shop profile, master attendance & salary statement",
                                         icon = Icons.Default.Description,
                                         onClick = { showReportChoiceDialog = true }
-                                    )
-                                }
-                                item {
-                                    MoreMenuItem(
-                                        title = "In-App Updates (GitHub APK)",
-                                        subtitle = "Check and install latest APK updates directly without downloading manually",
-                                        icon = Icons.Default.SystemUpdate,
-                                        onClick = { showInAppUpdateDialog = true }
                                     )
                                 }
                             }
@@ -1275,8 +1263,8 @@ fun AdminMainScreen(
         val biz = business
 
         val isCheckIn = activeQrTab == 0
-        val qrLabel = if (isCheckIn) "CHECK IN (Aane ka)" else "CHECK OUT (Jaane ka)"
-        val qrPayload = "ORAKLE_DUKAAN_GATE_PASS:TYPE=${if (isCheckIn) "IN" else "OUT"}:BIZ_ID=${biz?.id ?: ""}:CODE=${biz?.businessCode ?: ""}:$qrSalt"
+        val qrLabel = if (isCheckIn) "CHECK IN" else "CHECK OUT"
+        val qrPayload = "ORAKLE_DUKAAN:${if (isCheckIn) "IN" else "OUT"}:${biz?.id ?: ""}:${biz?.businessCode ?: ""}:$qrSalt"
 
         val qrBitmap = remember(activeQrTab, qrSalt, biz) {
             com.example.dukaan.service.QrCodeUtil.generateQrBitmap(
@@ -1295,7 +1283,7 @@ fun AdminMainScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Shop Attendance QRs", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text("Shop Attendance QRs", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     IconButton(onClick = { showQrDialog = false }, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Close")
                     }
@@ -1307,7 +1295,7 @@ fun AdminMainScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // QR 1 vs QR 2 Tab Selector (Aane ka vs Jaane ka)
+                    // QR 1 vs QR 2 Tab Selector
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1315,7 +1303,7 @@ fun AdminMainScreen(
                         Button(
                             onClick = { activeQrTab = 0 },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isCheckIn) Color(0xFF15803D) else MaterialTheme.colorScheme.surfaceVariant,
+                                containerColor = if (isCheckIn) Color(0xFF16A34A) else MaterialTheme.colorScheme.surfaceVariant,
                                 contentColor = if (isCheckIn) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                             ),
                             shape = RoundedCornerShape(8.dp),
@@ -1323,7 +1311,7 @@ fun AdminMainScreen(
                         ) {
                             Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Aane ka QR (IN)", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("QR 1: CHECK IN", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Button(
                             onClick = { activeQrTab = 1 },
@@ -1336,7 +1324,7 @@ fun AdminMainScreen(
                         ) {
                             Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Jaane ka QR (OUT)", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("QR 2: CHECK OUT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -1356,7 +1344,7 @@ fun AdminMainScreen(
                     }
 
                     Text(
-                        text = if (isCheckIn) "Staff subah aate waqt yeh QR scan karega (Check-IN)." else "Staff shaam ko duty khatam karte waqt yeh QR scan karega (Check-OUT).",
+                        text = if (isCheckIn) "Staff scans QR 1 at shift start to record Check-In." else "Staff scans QR 2 at shift finish to record Check-Out.",
                         fontSize = 11.sp,
                         color = OrakleSlate600,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1571,62 +1559,35 @@ fun AdminMainScreen(
                         } catch (_: Exception) { null }
                     }
 
-                    val imageReq = remember(photoUrl) {
-                        coil.request.ImageRequest.Builder(context)
-                            .data(if (localFile.exists()) localFile else photoUrl)
-                            .crossfade(true)
-                            .apply {
-                                if (photoUrl.startsWith("http")) {
-                                    addHeader("apikey", com.example.dukaan.data.remote.SupabaseClient.ANON_KEY)
-                                    addHeader("Authorization", "Bearer ${com.example.dukaan.data.remote.SupabaseClient.ANON_KEY}")
-                                }
-                            }
-                            .build()
-                    }
-
                     Box(
                         modifier = Modifier
-                            .size(260.dp)
+                            .size(240.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(OrakleSlate100)
                             .border(2.dp, OrakleSlate300, RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        coil.compose.SubcomposeAsyncImage(
-                            model = imageReq,
-                            contentDescription = "Attendance Photo",
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                            loading = {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(color = OrakleRedPrimary, modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
-                                }
-                            },
-                            error = {
-                                if (bitmap != null) {
-                                    Image(
-                                        bitmap = bitmap.asImageBitmap(),
-                                        contentDescription = "Attendance Photo",
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.padding(16.dp)
-                                    ) {
-                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(48.dp))
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            text = "Verified Selfie\n(Live GPS Capture)",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = OrakleSlate700,
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                        )
-                                    }
-                                }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Attendance Photo",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = if (photoUrl.startsWith("http")) "Stored in Cloud Bucket:\n$photoUrl" else "Saved in device storage:\n${localFile.name}",
+                                    fontSize = 11.sp,
+                                    color = OrakleSlate600,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
                             }
-                        )
+                        }
                     }
                     Text("Verified original camera capture with live geofencing.", fontSize = 11.sp, color = OrakleSlate500)
                 }
@@ -1639,12 +1600,6 @@ fun AdminMainScreen(
                     Text("Close")
                 }
             }
-        )
-    }
-
-    if (showInAppUpdateDialog) {
-        com.example.dukaan.service.InAppUpdateDialog(
-            onDismiss = { showInAppUpdateDialog = false }
         )
     }
 }
@@ -1809,7 +1764,6 @@ fun EmployeeCard(
     employee: Employee,
     onEditClick: () -> Unit
 ) {
-    val context = LocalContext.current
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1828,55 +1782,17 @@ fun EmployeeCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(42.dp)
                         .clip(CircleShape)
                         .background(OrakleSlate100),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (employee.photoUrl.isNotBlank()) {
-                        val localFile = java.io.File(employee.photoUrl)
-                        val imageReq = remember(employee.photoUrl) {
-                            coil.request.ImageRequest.Builder(context)
-                                .data(if (localFile.exists()) localFile else employee.photoUrl)
-                                .crossfade(true)
-                                .apply {
-                                    if (employee.photoUrl.startsWith("http")) {
-                                        addHeader("apikey", com.example.dukaan.data.remote.SupabaseClient.ANON_KEY)
-                                        addHeader("Authorization", "Bearer ${com.example.dukaan.data.remote.SupabaseClient.ANON_KEY}")
-                                    }
-                                }
-                                .build()
-                        }
-                        coil.compose.SubcomposeAsyncImage(
-                            model = imageReq,
-                            contentDescription = employee.fullName,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                            loading = {
-                                Text(
-                                    text = employee.fullName.take(2).uppercase(),
-                                    fontWeight = FontWeight.Bold,
-                                    color = OrakleRedPrimary,
-                                    fontSize = 14.sp
-                                )
-                            },
-                            error = {
-                                Text(
-                                    text = employee.fullName.take(2).uppercase(),
-                                    fontWeight = FontWeight.Bold,
-                                    color = OrakleRedPrimary,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        )
-                    } else {
-                        Text(
-                            text = employee.fullName.take(2).uppercase(),
-                            fontWeight = FontWeight.Bold,
-                            color = OrakleRedPrimary,
-                            fontSize = 14.sp
-                        )
-                    }
+                    Text(
+                        text = employee.fullName.take(2).uppercase(),
+                        fontWeight = FontWeight.Bold,
+                        color = OrakleRedPrimary,
+                        fontSize = 15.sp
+                    )
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f, fill = false)) {
