@@ -138,17 +138,16 @@ fun EmployeeMainScreen(
     var isOfflineMode by remember { mutableStateOf(false) }
     val pendingSyncPunches = attendanceHistory.count { it.syncStatus == "PENDING_SYNC" }
 
-    // Real device coordinates or fallback to shop
-    var isSimulatingOutside by remember { mutableStateOf(false) }
+    // Real device coordinates (live GPS)
     val shopLat = business?.latitude ?: 26.9124
     val shopLng = business?.longitude ?: 75.7873
-    val currentLat = deviceLat ?: (if (isSimulatingOutside) shopLat + 0.005 else shopLat)
-    val currentLng = deviceLng ?: (if (isSimulatingOutside) shopLng + 0.005 else shopLng)
+    val currentLat = deviceLat ?: shopLat
+    val currentLng = deviceLng ?: shopLng
 
     val distanceMeters = remember(currentLat, currentLng, business) {
         business?.let { b ->
             repository.calculateDistanceMeters(b.latitude, b.longitude, currentLat, currentLng)
-        } ?: 15.0
+        } ?: 0.0
     }
     val isInsideGeofence = distanceMeters <= (business?.geofenceRadiusMeters ?: 100)
 
@@ -160,6 +159,7 @@ fun EmployeeMainScreen(
     var showLeaveDialog by remember { mutableStateOf(false) }
     var showExpenseDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showInAppUpdateDialog by remember { mutableStateOf(false) }
     var selectedLeaveForEdit by remember { mutableStateOf<LeaveRequest?>(null) }
     var selectedExpenseForEdit by remember { mutableStateOf<ExpenseRecord?>(null) }
     var showQrScannerDialog by remember { mutableStateOf(false) }
@@ -207,6 +207,18 @@ fun EmployeeMainScreen(
         while (true) {
             currentTimeStr = SimpleDateFormat("hh:mm:ss a", Locale.ENGLISH).format(Date())
             delay(1000)
+        }
+    }
+
+    // Support Messages Auto-Sync loop (Every 5 seconds)
+    LaunchedEffect(businessId) {
+        if (businessId.isNotBlank()) {
+            while (true) {
+                try {
+                    repository.syncSupportMessages(businessId)
+                } catch (_: Exception) {}
+                delay(5000)
+            }
         }
     }
 
@@ -381,19 +393,6 @@ fun EmployeeMainScreen(
                                         }
                                     }
 
-                                    // Quick GPS Testing toggle for evaluator
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center
-                                    ) {
-                                        Text("Simulate Outside Geofence:", fontSize = 11.sp, color = OrakleSlate600)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Switch(
-                                            checked = isSimulatingOutside,
-                                            onCheckedChange = { isSimulatingOutside = it },
-                                            modifier = Modifier.height(24.dp)
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -402,7 +401,7 @@ fun EmployeeMainScreen(
                             // Primary IN / OUT Action Buttons
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Button(
                                     onClick = {
@@ -411,18 +410,15 @@ fun EmployeeMainScreen(
                                     },
                                     enabled = !isCurrentlyWorking && !isPunching,
                                     colors = ButtonDefaults.buttonColors(containerColor = OrakleGreen),
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(58.dp)
                                         .testTag("start_duty_button")
                                 ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Column(horizontalAlignment = Alignment.Start) {
-                                        Text("START DUTY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Text("Punch IN", fontSize = 10.sp)
-                                    }
+                                    Text("Start Duty (IN)", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
                                 }
 
                                 Button(
@@ -437,18 +433,15 @@ fun EmployeeMainScreen(
                                     },
                                     enabled = isCurrentlyWorking && !isPunching,
                                     colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary),
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(58.dp)
                                         .testTag("end_duty_button")
                                 ) {
-                                    Icon(Icons.Default.Stop, contentDescription = null)
+                                    Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Column(horizontalAlignment = Alignment.Start) {
-                                        Text("END DUTY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Text("Punch OUT", fontSize = 10.sp)
-                                    }
+                                    Text("End Duty (OUT)", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
                                 }
                             }
                         }
@@ -786,16 +779,7 @@ fun EmployeeMainScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        val avatarBitmap = remember(employee?.photoUrl) {
-                                            try {
-                                                val p = employee?.photoUrl.orEmpty()
-                                                if (p.isNotBlank() && !p.startsWith("http")) {
-                                                    val f = java.io.File(p)
-                                                    if (f.exists()) android.graphics.BitmapFactory.decodeFile(f.absolutePath) else null
-                                                } else null
-                                            } catch (_: Exception) { null }
-                                        }
-
+                                        val photoUrl = employee?.photoUrl.orEmpty()
                                         Box(
                                             modifier = Modifier
                                                 .size(56.dp)
@@ -805,15 +789,42 @@ fun EmployeeMainScreen(
                                                 .clickable {
                                                     profilePhotoPickerLauncher.launch(
                                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                                    )
+                                                     )
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            if (avatarBitmap != null) {
-                                                Image(
-                                                    bitmap = avatarBitmap.asImageBitmap(),
+                                            if (photoUrl.isNotBlank()) {
+                                                val localFile = java.io.File(photoUrl)
+                                                val imageReq = remember(photoUrl) {
+                                                    coil.request.ImageRequest.Builder(context)
+                                                        .data(if (localFile.exists()) localFile else photoUrl)
+                                                        .crossfade(true)
+                                                        .apply {
+                                                            if (photoUrl.startsWith("http")) {
+                                                                addHeader("apikey", com.example.dukaan.data.remote.SupabaseClient.ANON_KEY)
+                                                                addHeader("Authorization", "Bearer ${com.example.dukaan.data.remote.SupabaseClient.ANON_KEY}")
+                                                            }
+                                                        }
+                                                        .build()
+                                                }
+                                                coil.compose.SubcomposeAsyncImage(
+                                                    model = imageReq,
                                                     contentDescription = "Profile Photo",
-                                                    modifier = Modifier.fillMaxSize()
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    loading = {
+                                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = OrakleRedPrimary, strokeWidth = 2.dp)
+                                                        }
+                                                    },
+                                                    error = {
+                                                        Text(
+                                                            text = (employee?.fullName?.take(1) ?: "S").uppercase(),
+                                                            fontSize = 22.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = OrakleRedPrimary
+                                                        )
+                                                    }
                                                 )
                                             } else {
                                                 Text(
@@ -1002,6 +1013,33 @@ fun EmployeeMainScreen(
                                 }
                             }
                         }
+
+                        // IN-APP UPDATE CARD
+                        item {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                onClick = { showInAppUpdateDialog = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = OrakleRedPrimary)
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text("Check In-App Updates", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            Text("Download latest APK update from GitHub", fontSize = 11.sp, color = OrakleSlate500)
+                                        }
+                                    }
+                                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = OrakleSlate400)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
                     }
                 }
             }
@@ -1073,11 +1111,32 @@ fun EmployeeMainScreen(
                     return@RealQrScannerDialog
                 }
 
-                val detectedType = when {
-                    scannedCode.contains(":OUT", ignoreCase = true) || scannedCode.contains("CHECK OUT", ignoreCase = true) || scannedCode.contains("_OUT", ignoreCase = true) -> AttendanceType.OUT
-                    scannedCode.contains(":IN", ignoreCase = true) || scannedCode.contains("CHECK IN", ignoreCase = true) || scannedCode.contains("_IN", ignoreCase = true) -> AttendanceType.IN
-                    else -> if (isCurrentlyWorking) AttendanceType.OUT else AttendanceType.IN
+                val isOutQr = scannedCode.contains(":OUT", ignoreCase = true) ||
+                        scannedCode.contains("CHECK OUT", ignoreCase = true) ||
+                        scannedCode.contains("TYPE=OUT", ignoreCase = true) ||
+                        scannedCode.contains("JAANE", ignoreCase = true)
+
+                val isInQr = scannedCode.contains(":IN", ignoreCase = true) ||
+                        scannedCode.contains("CHECK IN", ignoreCase = true) ||
+                        scannedCode.contains("TYPE=IN", ignoreCase = true) ||
+                        scannedCode.contains("AANE", ignoreCase = true)
+
+                if (isInQr && !isOutQr) {
+                    if (isCurrentlyWorking) {
+                        Toast.makeText(context, "Aap pehle se Check-In (Duty par) hain! Dobara Aane ka QR scan nahi kar sakte. Jaane ke liye Jaane Ka (OUT) QR scan karein.", Toast.LENGTH_LONG).show()
+                        return@RealQrScannerDialog
+                    }
+                } else if (isOutQr && !isInQr) {
+                    if (!isCurrentlyWorking) {
+                        Toast.makeText(context, "Aap abhi Check-In nahi hain! Pehle Aane Ka (IN) QR scan karein.", Toast.LENGTH_LONG).show()
+                        return@RealQrScannerDialog
+                    }
+                } else {
+                    Toast.makeText(context, "Invalid QR Code! Kripya dukaan ka sahi Aane (IN) ya Jaane (OUT) ka QR pass scan karein.", Toast.LENGTH_LONG).show()
+                    return@RealQrScannerDialog
                 }
+
+                val detectedType = if (isInQr) AttendanceType.IN else AttendanceType.OUT
 
                 if (detectedType == AttendanceType.OUT && isBeforeShiftEnd(business?.shiftEnd)) {
                     NotificationHelper.showAdminNotification(
@@ -1107,6 +1166,13 @@ fun EmployeeMainScreen(
                     }
                 }
             }
+        )
+    }
+
+    // In-App Updates Dialog
+    if (showInAppUpdateDialog) {
+        com.example.dukaan.service.InAppUpdateDialog(
+            onDismiss = { showInAppUpdateDialog = false }
         )
     }
 

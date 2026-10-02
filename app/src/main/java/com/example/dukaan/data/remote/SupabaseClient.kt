@@ -48,6 +48,7 @@ object SupabaseClient {
     private const val TAG = "SupabaseClient"
     const val SUPABASE_URL = "https://uzylcwkxlonqyjlhqpre.supabase.co"
     const val PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV6eWxjd2t4bG9ucXlqbGhxcHJlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1OTM0NzEsImV4cCI6MjEwNjE2OTQ3MX0.9uSwgmibSCpzg-BENerdnKQXs1HzNk3OYpaEzMPM09I"
+    const val ANON_KEY = PUBLISHABLE_KEY
     const val SECRET_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV6eWxjd2t4bG9ucXlqbGhxcHJlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDU5MzQ3MSwiZXhwIjoyMTA2MTY5NDcxfQ.PXAglLBtwkkJWJXkae8Ycg52GkCraRiFX7mOhJEUMO8"
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -541,6 +542,7 @@ object SupabaseClient {
                 put("bank_ifsc", employee.bankIfsc)
                 put("emergency_contact", employee.emergencyContact)
                 put("status", employee.status)
+                put("photo_url", employee.photoUrl)
             }
 
             val bodyJson = JSONObject().apply {
@@ -1364,6 +1366,7 @@ object SupabaseClient {
                 put("bank_ifsc", employee.bankIfsc)
                 put("emergency_contact", employee.emergencyContact)
                 put("status", employee.status)
+                put("photo_url", employee.photoUrl)
             }
 
             var found = false
@@ -1391,6 +1394,30 @@ object SupabaseClient {
             httpClient.newCall(req).execute().close()
         } catch (e: Exception) {
             Log.e(TAG, "addOrUpdateEmployeeInShopMetadata error", e)
+        }
+    }
+
+    /**
+     * Updates an employee's photo URL directly in Supabase User Metadata.
+     */
+    suspend fun updateEmployeePhotoInSupabase(employeeId: String, photoUrl: String) = withContext(Dispatchers.IO) {
+        try {
+            val empUser = findSupabaseUserByEmployeeId(employeeId)
+            if (empUser != null) {
+                val empUserId = empUser.getString("id")
+                val meta = empUser.optJSONObject("user_metadata") ?: JSONObject()
+                meta.put("photo_url", photoUrl)
+                val req = Request.Builder()
+                    .url("$SUPABASE_URL/auth/v1/admin/users/$empUserId")
+                    .addHeader("apikey", SECRET_KEY)
+                    .addHeader("Authorization", "Bearer $SECRET_KEY")
+                    .addHeader("Content-Type", "application/json")
+                    .put(JSONObject().apply { put("user_metadata", meta) }.toString().toRequestBody(jsonMediaType))
+                    .build()
+                httpClient.newCall(req).execute().close()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "updateEmployeePhotoInSupabase error", e)
         }
     }
 
@@ -1669,5 +1696,122 @@ object SupabaseClient {
             Log.w(TAG, "Supabase avatar upload error: ${e.message}")
         }
         return@withContext null
+    }
+
+    /**
+     * Records a chat / support message in Supabase live under shop user metadata.
+     */
+    suspend fun recordSupportMessageInSupabase(msg: com.example.dukaan.data.local.SupportMessageEntity): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val user = findSupabaseUserByShopId(msg.businessId) ?: return@withContext Result.failure(Exception("Shop not found in Supabase"))
+            val userId = user.getString("id")
+            val currentMeta = user.optJSONObject("user_metadata") ?: JSONObject()
+            val list = currentMeta.optJSONArray("support_messages") ?: JSONArray()
+
+            val msgObj = JSONObject().apply {
+                put("id", msg.id)
+                put("business_id", msg.businessId)
+                put("sender_role", msg.senderRole)
+                put("sender_name", msg.senderName)
+                put("message", msg.message)
+                put("timestamp", msg.timestamp)
+                put("is_read", msg.isRead)
+            }
+
+            var found = false
+            for (i in 0 until list.length()) {
+                if (list.getJSONObject(i).optString("id") == msg.id) {
+                    list.put(i, msgObj)
+                    found = true
+                    break
+                }
+            }
+            if (!found) list.put(msgObj)
+
+            currentMeta.put("support_messages", list)
+
+            val url = "$SUPABASE_URL/auth/v1/admin/users/$userId"
+            val bodyJson = JSONObject().apply {
+                put("user_metadata", currentMeta)
+            }
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SECRET_KEY)
+                .addHeader("Authorization", "Bearer $SECRET_KEY")
+                .addHeader("Content-Type", "application/json")
+                .put(bodyJson.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val success = response.isSuccessful
+            response.close()
+            Result.success(success)
+        } catch (e: Exception) {
+            Log.e(TAG, "recordSupportMessageInSupabase error", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetches live support messages for a shop from Supabase.
+     */
+    suspend fun fetchSupportMessagesFromSupabase(businessId: String): List<com.example.dukaan.data.local.SupportMessageEntity> = withContext(Dispatchers.IO) {
+        try {
+            val user = findSupabaseUserByShopId(businessId) ?: return@withContext emptyList()
+            val meta = user.optJSONObject("user_metadata") ?: return@withContext emptyList()
+            val list = meta.optJSONArray("support_messages") ?: return@withContext emptyList()
+
+            val results = mutableListOf<com.example.dukaan.data.local.SupportMessageEntity>()
+            for (i in 0 until list.length()) {
+                val o = list.getJSONObject(i)
+                results.add(
+                    com.example.dukaan.data.local.SupportMessageEntity(
+                        id = o.optString("id", UUID.randomUUID().toString()),
+                        businessId = o.optString("business_id", businessId),
+                        senderRole = o.optString("sender_role", "USER"),
+                        senderName = o.optString("sender_name", "Anonymous"),
+                        message = o.optString("message", ""),
+                        timestamp = o.optLong("timestamp", System.currentTimeMillis()),
+                        isRead = o.optBoolean("is_read", false)
+                    )
+                )
+            }
+            results
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Fetches all live support messages across all shops for Superadmin.
+     */
+    suspend fun fetchAllSupportMessagesFromSupabase(): List<com.example.dukaan.data.local.SupportMessageEntity> = withContext(Dispatchers.IO) {
+        try {
+            val allUsers = fetchAllRawUsersFromSupabase()
+            val results = mutableListOf<com.example.dukaan.data.local.SupportMessageEntity>()
+            for (u in allUsers) {
+                val meta = u.optJSONObject("user_metadata") ?: continue
+                val list = meta.optJSONArray("support_messages") ?: continue
+                val bId = meta.optString("shop_id", meta.optString("business_id", u.optString("id", "")))
+                for (i in 0 until list.length()) {
+                    val o = list.getJSONObject(i)
+                    results.add(
+                        com.example.dukaan.data.local.SupportMessageEntity(
+                            id = o.optString("id", UUID.randomUUID().toString()),
+                            businessId = o.optString("business_id", bId),
+                            senderRole = o.optString("sender_role", "USER"),
+                            senderName = o.optString("sender_name", "Anonymous"),
+                            message = o.optString("message", ""),
+                            timestamp = o.optLong("timestamp", System.currentTimeMillis()),
+                            isRead = o.optBoolean("is_read", false)
+                        )
+                    )
+                }
+            }
+            results
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 }

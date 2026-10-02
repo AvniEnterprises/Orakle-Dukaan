@@ -214,17 +214,17 @@ class DukaanRepository(context: Context) {
                     dao.insertBusiness(shop)
                 }
 
-                // Prune local shops and their cascading data that no longer exist in Supabase
+                // Preserve local shops and push any unsynced shops up to Supabase
                 val localShops = dao.getAllBusinessesList()
                 for (local in localShops) {
                     if (!remoteShopIds.contains(local.id) && !remoteShopCodes.contains(local.businessCode)) {
-                        dao.deleteBusinessById(local.id)
-                        dao.deleteEmployeesByBusinessId(local.id)
-                        dao.deleteAttendanceByBusinessId(local.id)
-                        dao.deleteLeavesByBusinessId(local.id)
-                        dao.deleteAdvancesByBusinessId(local.id)
-                        dao.deleteExpensesByBusinessId(local.id)
-                        Log.i("DukaanRepository", "Pruned deleted shop from local database: ${local.id} (${local.name})")
+                        try {
+                            val pass = if (local.password.isNotBlank()) local.password else "Password123!"
+                            SupabaseClient.registerShopInSupabase(local, pass)
+                            Log.i("DukaanRepository", "Preserved and synced local shop to Supabase: ${local.id} (${local.name})")
+                        } catch (ex: Exception) {
+                            Log.w("DukaanRepository", "Could not push local shop ${local.id} to Supabase: ${ex.message}")
+                        }
                     }
                 }
 
@@ -446,11 +446,14 @@ class DukaanRepository(context: Context) {
                     for (e in data.expenses) { dao.insertExpense(e) }
                     for (a in data.advances) { dao.insertAdvance(a) }
 
-                    // Prune local staff for this shop if deleted in Supabase
+                    // Preserve local staff and push any unsynced staff to Supabase
                     val localEmps = dao.getEmployeesForBusinessList(businessId)
                     for (localEmp in localEmps) {
                         if (!remoteEmpIds.contains(localEmp.id)) {
-                            dao.deleteEmployeeById(localEmp.id)
+                            try {
+                                val pass = if (localEmp.password.isNotBlank()) localEmp.password else "Password123!"
+                                SupabaseClient.registerEmployeeInSupabase(localEmp, pass)
+                            } catch (_: Exception) {}
                         }
                     }
                 }
@@ -476,7 +479,10 @@ class DukaanRepository(context: Context) {
                 val localEmps = dao.getAllEmployeesList()
                 for (localEmp in localEmps) {
                     if (!remoteEmpIds.contains(localEmp.id)) {
-                        dao.deleteEmployeeById(localEmp.id)
+                        try {
+                            val pass = if (localEmp.password.isNotBlank()) localEmp.password else "Password123!"
+                            SupabaseClient.registerEmployeeInSupabase(localEmp, pass)
+                        } catch (_: Exception) {}
                     }
                 }
             }
@@ -928,7 +934,31 @@ class DukaanRepository(context: Context) {
     }
 
     suspend fun sendSupportMessage(msg: SupportMessage) = withContext(Dispatchers.IO) {
-        dao.insertSupportMessage(msg.toEntity())
+        val entity = msg.toEntity()
+        dao.insertSupportMessage(entity)
+        try {
+            SupabaseClient.recordSupportMessageInSupabase(entity)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync support message to Supabase", e)
+        }
+    }
+
+    suspend fun syncSupportMessages(businessId: String) = withContext(Dispatchers.IO) {
+        try {
+            val list = SupabaseClient.fetchSupportMessagesFromSupabase(businessId)
+            for (msg in list) {
+                dao.insertSupportMessage(msg)
+            }
+        } catch (_: Exception) {}
+    }
+
+    suspend fun syncAllSupportMessages() = withContext(Dispatchers.IO) {
+        try {
+            val list = SupabaseClient.fetchAllSupportMessagesFromSupabase()
+            for (msg in list) {
+                dao.insertSupportMessage(msg)
+            }
+        } catch (_: Exception) {}
     }
 
     suspend fun clearCompletedLeaves(businessId: String) = withContext(Dispatchers.IO) {
@@ -950,6 +980,7 @@ class DukaanRepository(context: Context) {
         val updated = found.copy(photoUrl = finalUrl)
         dao.updateEmployee(updated)
         try {
+            SupabaseClient.updateEmployeePhotoInSupabase(employeeId, finalUrl)
             SupabaseClient.registerEmployeeInSupabase(updated, updated.password)
         } catch (_: Exception) {}
         finalUrl

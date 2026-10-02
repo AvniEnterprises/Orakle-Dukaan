@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dukaan.data.model.*
 import com.example.ui.theme.*
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 @Composable
@@ -228,11 +229,17 @@ fun EditBusinessDialog(
     var city by remember { mutableStateOf(business.city) }
     var state by remember { mutableStateOf(business.state) }
     var pincode by remember { mutableStateOf(business.pincode) }
+    var latitude by remember { mutableStateOf(business.latitude.toString()) }
+    var longitude by remember { mutableStateOf(business.longitude.toString()) }
     var geofenceRadius by remember { mutableStateOf(business.geofenceRadiusMeters.toString()) }
     var shiftStart by remember { mutableStateOf(business.shiftStart) }
     var shiftEnd by remember { mutableStateOf(business.shiftEnd) }
     var graceMinutes by remember { mutableStateOf(business.graceMinutes.toString()) }
     var overtimeMinutes by remember { mutableStateOf(business.overtimeThresholdMinutes.toString()) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isDetectingLocation by remember { mutableStateOf(false) }
 
     // SuperAdmin editable fields
     var plan by remember { mutableStateOf(business.plan) }
@@ -321,12 +328,118 @@ fun EditBusinessDialog(
                         modifier = Modifier.weight(1f)
                     )
                 }
-                OutlinedTextField(
-                    value = geofenceRadius,
-                    onValueChange = { geofenceRadius = it },
-                    label = { Text("Geofence Radius (meters, e.g. 50, 100, 200)") },
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = latitude,
+                        onValueChange = { latitude = it },
+                        label = { Text("Shop Latitude") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = longitude,
+                        onValueChange = { longitude = it },
+                        label = { Text("Shop Longitude") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            isDetectingLocation = true
+                            coroutineScope.launch {
+                                try {
+                                    val fused = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context)
+                                    fused.lastLocation.addOnSuccessListener { loc ->
+                                        isDetectingLocation = false
+                                        if (loc != null) {
+                                            latitude = String.format(java.util.Locale.ENGLISH, "%.6f", loc.latitude)
+                                            longitude = String.format(java.util.Locale.ENGLISH, "%.6f", loc.longitude)
+                                            android.widget.Toast.makeText(context, "Location pinned: $latitude, $longitude", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            android.widget.Toast.makeText(context, "Please turn on device GPS", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }.addOnFailureListener {
+                                        isDetectingLocation = false
+                                        android.widget.Toast.makeText(context, "Failed to get GPS location", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (_: Exception) {
+                                    isDetectingLocation = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        if (isDetectingLocation) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrakleRedPrimary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Pin Live GPS", fontSize = 11.sp, color = OrakleRedPrimary, maxLines = 1)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val uri = android.net.Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude($name)")
+                                val mapIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+                                context.startActivity(mapIntent)
+                            } catch (_: Exception) {
+                                val webUri = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=$latitude,$longitude")
+                                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, webUri))
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(16.dp), tint = OrakleSlate700)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Google Maps", fontSize = 11.sp, color = OrakleSlate800, maxLines = 1)
+                    }
+                }
+
+                Card(
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = OrakleSlate100),
                     modifier = Modifier.fillMaxWidth()
-                )
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.ShareLocation, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Geofence Perimeter: ${geofenceRadius}m", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrakleSlate800)
+                            }
+                        }
+                        Text("Real GPS coordinates: $latitude, $longitude", fontSize = 11.sp, color = OrakleSlate600)
+                        Text("Staff can only punch IN/OUT within this ${geofenceRadius}m boundary.", fontSize = 10.sp, color = OrakleSlate500)
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Geofence Radius (meters):", fontSize = 11.sp, color = OrakleSlate600)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("20", "50", "100", "200", "500").forEach { r ->
+                            FilterChip(
+                                selected = geofenceRadius == r,
+                                onClick = { geofenceRadius = r },
+                                label = { Text("${r}m", fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = geofenceRadius,
+                        onValueChange = { geofenceRadius = it },
+                        label = { Text("Custom Radius in Meters") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Text("TIMINGS & SHIFT POLICY", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrakleSlate600)
@@ -478,6 +591,8 @@ fun EditBusinessDialog(
                             city = city.trim(),
                             state = state.trim(),
                             pincode = pincode.trim(),
+                            latitude = latitude.toDoubleOrNull() ?: business.latitude,
+                            longitude = longitude.toDoubleOrNull() ?: business.longitude,
                             geofenceRadiusMeters = geofenceRadius.toIntOrNull() ?: business.geofenceRadiusMeters,
                             shiftStart = shiftStart.trim(),
                             shiftEnd = shiftEnd.trim(),

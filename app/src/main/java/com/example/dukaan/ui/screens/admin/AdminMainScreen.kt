@@ -59,6 +59,7 @@ fun AdminMainScreen(
         while (isActive) {
             try {
                 repository.syncEmployeesAndAttendanceFromSupabase(businessId)
+                repository.syncSupportMessages(businessId)
                 val updated = repository.getBusinessById(businessId)
                 if (updated != null) {
                     business = updated
@@ -79,7 +80,14 @@ fun AdminMainScreen(
     val supportMessages by repository.getSupportMessages(businessId).collectAsState(initial = emptyList())
 
     var selectedNavTab by remember { mutableStateOf(0) } // 0: Dashboard, 1: Staff, 2: Attendance, 3: Money/Udhaar, 4: More
-    BackHandler(enabled = selectedNavTab != 0) { selectedNavTab = 0 }
+    var moreSection by remember { mutableStateOf("MENU") } // "MENU", "LEAVES", "DOCUMENTS", "SUPPORT", "REPORTS"
+    BackHandler(enabled = selectedNavTab != 0 || moreSection != "MENU") {
+        if (moreSection != "MENU") {
+            moreSection = "MENU"
+        } else {
+            selectedNavTab = 0
+        }
+    }
 
     var showAddEmployeeDialog by remember { mutableStateOf(false) }
     var showIssueAdvanceDialog by remember { mutableStateOf(false) }
@@ -96,6 +104,7 @@ fun AdminMainScreen(
     var showPdfActionsDialog by remember { mutableStateOf(false) }
     var showReportChoiceDialog by remember { mutableStateOf(false) }
     var previewingPhotoUrl by remember { mutableStateOf<String?>(null) }
+    var showInAppUpdateDialog by remember { mutableStateOf(false) }
 
     val logoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -291,7 +300,7 @@ fun AdminMainScreen(
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 QuickActionButton(
                                     title = "+ Employee",
@@ -300,7 +309,7 @@ fun AdminMainScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 QuickActionButton(
-                                    title = "Issue Udhaar",
+                                    title = "Udhaar",
                                     icon = Icons.Default.AccountBalanceWallet,
                                     onClick = { showIssueAdvanceDialog = true },
                                     modifier = Modifier.weight(1f)
@@ -315,6 +324,15 @@ fun AdminMainScreen(
                                             showPdfActionsDialog = true
                                             Toast.makeText(context, "Generated: ${file.name}", Toast.LENGTH_LONG).show()
                                         }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                QuickActionButton(
+                                    title = "Chat (${supportMessages.size})",
+                                    icon = Icons.Default.Chat,
+                                    onClick = {
+                                        selectedNavTab = 4
+                                        moreSection = "SUPPORT"
                                     },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -661,8 +679,6 @@ fun AdminMainScreen(
 
                 4 -> {
                     // TAB 4: MORE / LEAVES / DOCUMENTS / SUPPORT CHAT / REPORTS
-                    var moreSection by remember { mutableStateOf("MENU") } // "MENU", "LEAVES", "DOCUMENTS", "SUPPORT", "REPORTS"
-
                     when (moreSection) {
                         "MENU" -> {
                             LazyColumn(
@@ -720,6 +736,14 @@ fun AdminMainScreen(
                                         subtitle = "Shop profile, master attendance & salary statement",
                                         icon = Icons.Default.Description,
                                         onClick = { showReportChoiceDialog = true }
+                                    )
+                                }
+                                item {
+                                    MoreMenuItem(
+                                        title = "In-App Updates (GitHub APK)",
+                                        subtitle = "Check and install latest APK updates directly without downloading manually",
+                                        icon = Icons.Default.SystemUpdate,
+                                        onClick = { showInAppUpdateDialog = true }
                                     )
                                 }
                             }
@@ -1251,8 +1275,8 @@ fun AdminMainScreen(
         val biz = business
 
         val isCheckIn = activeQrTab == 0
-        val qrLabel = if (isCheckIn) "CHECK IN" else "CHECK OUT"
-        val qrPayload = "ORAKLE_DUKAAN:${if (isCheckIn) "IN" else "OUT"}:${biz?.id ?: ""}:${biz?.businessCode ?: ""}:$qrSalt"
+        val qrLabel = if (isCheckIn) "CHECK IN (Aane ka)" else "CHECK OUT (Jaane ka)"
+        val qrPayload = "ORAKLE_DUKAAN_GATE_PASS:TYPE=${if (isCheckIn) "IN" else "OUT"}:BIZ_ID=${biz?.id ?: ""}:CODE=${biz?.businessCode ?: ""}:$qrSalt"
 
         val qrBitmap = remember(activeQrTab, qrSalt, biz) {
             com.example.dukaan.service.QrCodeUtil.generateQrBitmap(
@@ -1271,7 +1295,7 @@ fun AdminMainScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Shop Attendance QRs", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("Shop Attendance QRs", fontWeight = FontWeight.Bold, fontSize = 17.sp)
                     IconButton(onClick = { showQrDialog = false }, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Close")
                     }
@@ -1283,7 +1307,7 @@ fun AdminMainScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // QR 1 vs QR 2 Tab Selector
+                    // QR 1 vs QR 2 Tab Selector (Aane ka vs Jaane ka)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1291,7 +1315,7 @@ fun AdminMainScreen(
                         Button(
                             onClick = { activeQrTab = 0 },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isCheckIn) Color(0xFF16A34A) else MaterialTheme.colorScheme.surfaceVariant,
+                                containerColor = if (isCheckIn) Color(0xFF15803D) else MaterialTheme.colorScheme.surfaceVariant,
                                 contentColor = if (isCheckIn) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                             ),
                             shape = RoundedCornerShape(8.dp),
@@ -1299,7 +1323,7 @@ fun AdminMainScreen(
                         ) {
                             Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("QR 1: CHECK IN", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Aane ka QR (IN)", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                         Button(
                             onClick = { activeQrTab = 1 },
@@ -1312,7 +1336,7 @@ fun AdminMainScreen(
                         ) {
                             Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("QR 2: CHECK OUT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Jaane ka QR (OUT)", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                         }
                     }
 
@@ -1332,7 +1356,7 @@ fun AdminMainScreen(
                     }
 
                     Text(
-                        text = if (isCheckIn) "Staff scans QR 1 at shift start to record Check-In." else "Staff scans QR 2 at shift finish to record Check-Out.",
+                        text = if (isCheckIn) "Staff subah aate waqt yeh QR scan karega (Check-IN)." else "Staff shaam ko duty khatam karte waqt yeh QR scan karega (Check-OUT).",
                         fontSize = 11.sp,
                         color = OrakleSlate600,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1547,35 +1571,62 @@ fun AdminMainScreen(
                         } catch (_: Exception) { null }
                     }
 
+                    val imageReq = remember(photoUrl) {
+                        coil.request.ImageRequest.Builder(context)
+                            .data(if (localFile.exists()) localFile else photoUrl)
+                            .crossfade(true)
+                            .apply {
+                                if (photoUrl.startsWith("http")) {
+                                    addHeader("apikey", com.example.dukaan.data.remote.SupabaseClient.ANON_KEY)
+                                    addHeader("Authorization", "Bearer ${com.example.dukaan.data.remote.SupabaseClient.ANON_KEY}")
+                                }
+                            }
+                            .build()
+                    }
+
                     Box(
                         modifier = Modifier
-                            .size(240.dp)
+                            .size(260.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(OrakleSlate100)
                             .border(2.dp, OrakleSlate300, RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (bitmap != null) {
-                            Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = "Attendance Photo",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(16.dp)
-                            ) {
-                                Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(48.dp))
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = if (photoUrl.startsWith("http")) "Stored in Cloud Bucket:\n$photoUrl" else "Saved in device storage:\n${localFile.name}",
-                                    fontSize = 11.sp,
-                                    color = OrakleSlate600,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
+                        coil.compose.SubcomposeAsyncImage(
+                            model = imageReq,
+                            contentDescription = "Attendance Photo",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            loading = {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(color = OrakleRedPrimary, modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
+                                }
+                            },
+                            error = {
+                                if (bitmap != null) {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = "Attendance Photo",
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(48.dp))
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = "Verified Selfie\n(Live GPS Capture)",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = OrakleSlate700,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                    }
+                                }
                             }
-                        }
+                        )
                     }
                     Text("Verified original camera capture with live geofencing.", fontSize = 11.sp, color = OrakleSlate500)
                 }
@@ -1588,6 +1639,12 @@ fun AdminMainScreen(
                     Text("Close")
                 }
             }
+        )
+    }
+
+    if (showInAppUpdateDialog) {
+        com.example.dukaan.service.InAppUpdateDialog(
+            onDismiss = { showInAppUpdateDialog = false }
         )
     }
 }
@@ -1752,6 +1809,7 @@ fun EmployeeCard(
     employee: Employee,
     onEditClick: () -> Unit
 ) {
+    val context = LocalContext.current
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1770,17 +1828,55 @@ fun EmployeeCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(44.dp)
                         .clip(CircleShape)
                         .background(OrakleSlate100),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = employee.fullName.take(2).uppercase(),
-                        fontWeight = FontWeight.Bold,
-                        color = OrakleRedPrimary,
-                        fontSize = 15.sp
-                    )
+                    if (employee.photoUrl.isNotBlank()) {
+                        val localFile = java.io.File(employee.photoUrl)
+                        val imageReq = remember(employee.photoUrl) {
+                            coil.request.ImageRequest.Builder(context)
+                                .data(if (localFile.exists()) localFile else employee.photoUrl)
+                                .crossfade(true)
+                                .apply {
+                                    if (employee.photoUrl.startsWith("http")) {
+                                        addHeader("apikey", com.example.dukaan.data.remote.SupabaseClient.ANON_KEY)
+                                        addHeader("Authorization", "Bearer ${com.example.dukaan.data.remote.SupabaseClient.ANON_KEY}")
+                                    }
+                                }
+                                .build()
+                        }
+                        coil.compose.SubcomposeAsyncImage(
+                            model = imageReq,
+                            contentDescription = employee.fullName,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            loading = {
+                                Text(
+                                    text = employee.fullName.take(2).uppercase(),
+                                    fontWeight = FontWeight.Bold,
+                                    color = OrakleRedPrimary,
+                                    fontSize = 14.sp
+                                )
+                            },
+                            error = {
+                                Text(
+                                    text = employee.fullName.take(2).uppercase(),
+                                    fontWeight = FontWeight.Bold,
+                                    color = OrakleRedPrimary,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        )
+                    } else {
+                        Text(
+                            text = employee.fullName.take(2).uppercase(),
+                            fontWeight = FontWeight.Bold,
+                            color = OrakleRedPrimary,
+                            fontSize = 14.sp
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f, fill = false)) {

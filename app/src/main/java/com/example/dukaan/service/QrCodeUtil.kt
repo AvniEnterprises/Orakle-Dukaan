@@ -5,15 +5,20 @@ import android.content.Intent
 import android.graphics.*
 import android.os.Environment
 import androidx.core.content.FileProvider
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import java.io.File
 import java.io.FileOutputStream
-import java.security.MessageDigest
+import java.util.EnumMap
 
 object QrCodeUtil {
 
     /**
-     * Generates a high-quality, distinctive branded QR code graphic
-     * with authentic finder patterns, timing patterns, and data matrix.
+     * Generates a 100% genuine, standard scannable QR Code using ZXing.
+     * Decorated with authentic shop details, brand header, and clear color-coded
+     * IN (Aane ka) vs OUT (Jaane ka) badges.
      */
     fun generateQrBitmap(
         payload: String,
@@ -21,13 +26,14 @@ object QrCodeUtil {
         typeLabel: String, // "CHECK IN" or "CHECK OUT"
         shopCode: String,
         width: Int = 600,
-        height: Int = 720
+        height: Int = 740
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-
-        // Clean white background
         canvas.drawColor(Color.WHITE)
+
+        val isCheckIn = typeLabel.contains("IN", ignoreCase = true) || typeLabel.contains("AANE", ignoreCase = true)
+        val accentColor = if (isCheckIn) Color.parseColor("#15803D") else Color.parseColor("#DC2626")
 
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#0F172A")
@@ -38,12 +44,6 @@ object QrCodeUtil {
         val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#0F172A")
             style = Paint.Style.FILL
-        }
-
-        val accentColor = if (typeLabel.contains("IN", ignoreCase = true)) {
-            Color.parseColor("#16A34A") // Green
-        } else {
-            Color.parseColor("#DC2626") // Red
         }
 
         val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -60,13 +60,13 @@ object QrCodeUtil {
 
         val subTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#64748B")
-            textSize = 16f
+            textSize = 15f
             textAlign = Paint.Align.CENTER
         }
 
         val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = 20f
+            textSize = 19f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
@@ -80,75 +80,59 @@ object QrCodeUtil {
         canvas.drawText("Shop Code: $shopCode", width / 2f, 110f, subTextPaint)
 
         // Type Badge: CHECK IN or CHECK OUT
-        val badgeRect = RectF(width / 2f - 140f, 125f, width / 2f + 140f, 165f)
+        val badgeRect = RectF(width / 2f - 165f, 125f, width / 2f + 165f, 168f)
         canvas.drawRoundRect(badgeRect, 10f, 10f, accentPaint)
-        canvas.drawText("GATE PASS: $typeLabel", width / 2f, 153f, badgeTextPaint)
+        val badgeDisplay = if (isCheckIn) "GATE PASS: AANE KA (CHECK IN)" else "GATE PASS: JAANE KA (CHECK OUT)"
+        canvas.drawText(badgeDisplay, width / 2f, 155f, badgeTextPaint)
 
-        // Deterministic QR Matrix from Payload Hash
-        val matrixSize = 25
-        val qrBoxSize = 360f
-        val startX = (width - qrBoxSize) / 2f
-        val startY = 190f
-        val cellSize = qrBoxSize / matrixSize
-
-        // Draw QR Container
-        val qrBoxRect = RectF(startX - 12f, startY - 12f, startX + qrBoxSize + 12f, startY + qrBoxSize + 12f)
-        canvas.drawRoundRect(qrBoxRect, 16f, 16f, borderPaint)
-
-        // Generate bits from sha256 of payload
-        val md = MessageDigest.getInstance("SHA-256")
-        val hash = md.digest(payload.toByteArray(Charsets.UTF_8))
-        val extendedBytes = ByteArray(matrixSize * matrixSize)
-        for (i in extendedBytes.indices) {
-            val byteA = hash[i % hash.size].toInt()
-            val byteB = hash[(i * 7 + 13) % hash.size].toInt()
-            extendedBytes[i] = (byteA xor byteB).toByte()
+        // Generate genuine ZXing QR BitMatrix
+        val qrBoxSize = 360
+        val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
+            put(EncodeHintType.CHARACTER_SET, "UTF-8")
+            put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M)
+            put(EncodeHintType.MARGIN, 1)
         }
 
-        // Draw Matrix Cells
-        for (r in 0 until matrixSize) {
-            for (c in 0 until matrixSize) {
-                val isFinderTopLeft = r < 7 && c < 7
-                val isFinderTopRight = r < 7 && c >= matrixSize - 7
-                val isFinderBottomLeft = r >= matrixSize - 7 && c < 7
+        val bitMatrix = try {
+            QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, qrBoxSize, qrBoxSize, hints)
+        } catch (_: Exception) {
+            null
+        }
 
-                if (!isFinderTopLeft && !isFinderTopRight && !isFinderBottomLeft) {
-                    val idx = r * matrixSize + c
-                    val isBlack = (extendedBytes[idx].toInt() and 1) != 0 || (r == 6 || c == 6) // Timing pattern
-                    if (isBlack) {
-                        val cx = startX + c * cellSize
-                        val cy = startY + r * cellSize
-                        canvas.drawRect(cx, cy, cx + cellSize, cy + cellSize, fillPaint)
+        val startX = (width - qrBoxSize) / 2f
+        val startY = 190f
+
+        // Draw QR Container Box
+        val qrBoxRect = RectF(startX - 10f, startY - 10f, startX + qrBoxSize + 10f, startY + qrBoxSize + 10f)
+        canvas.drawRoundRect(qrBoxRect, 16f, 16f, borderPaint)
+
+        if (bitMatrix != null) {
+            val qrWidth = bitMatrix.width
+            val qrHeight = bitMatrix.height
+            val cellW = qrBoxSize.toFloat() / qrWidth
+            val cellH = qrBoxSize.toFloat() / qrHeight
+
+            for (x in 0 until qrWidth) {
+                for (y in 0 until qrHeight) {
+                    if (bitMatrix.get(x, y)) {
+                        canvas.drawRect(
+                            startX + x * cellW,
+                            startY + y * cellH,
+                            startX + (x + 1) * cellW,
+                            startY + (y + 1) * cellH,
+                            fillPaint
+                        )
                     }
                 }
             }
         }
 
-        // Helper to draw Finder Pattern at (row, col)
-        fun drawFinderPattern(r: Int, c: Int) {
-            val x = startX + c * cellSize
-            val y = startY + r * cellSize
-            val s = 7 * cellSize
-
-            // Outer 7x7 square
-            canvas.drawRect(x, y, x + s, y + s, fillPaint)
-            // Inner 5x5 white square
-            val wPaint = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL }
-            canvas.drawRect(x + cellSize, y + cellSize, x + s - cellSize, y + s - cellSize, wPaint)
-            // Center 3x3 black square
-            canvas.drawRect(x + 2 * cellSize, y + 2 * cellSize, x + s - 2 * cellSize, y + s - 2 * cellSize, fillPaint)
-        }
-
-        // Draw 3 Finder Patterns
-        drawFinderPattern(0, 0)
-        drawFinderPattern(0, matrixSize - 7)
-        drawFinderPattern(matrixSize - 7, 0)
-
         // Footer instructions
         val footY = startY + qrBoxSize + 40f
         textPaint.textSize = 14f
-        canvas.drawText("Scan with employee app to verify attendance ($typeLabel)", width / 2f, footY, textPaint)
-        canvas.drawText("Secured with GPS Geofencing • Realtime Sync", width / 2f, footY + 22f, subTextPaint)
+        val actionDesc = if (isCheckIn) "Subah aate waqt duty start karne ke liye scan karein" else "Shaam ko duty end karte waqt exit ke liye scan karein"
+        canvas.drawText(actionDesc, width / 2f, footY, textPaint)
+        canvas.drawText("Secured with GPS Geofencing • Realtime Cloud Sync", width / 2f, footY + 22f, subTextPaint)
 
         return bitmap
     }
@@ -177,7 +161,7 @@ object QrCodeUtil {
         }
         try {
             context.startActivity(printIntent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             shareQrCode(context, file, jobName)
         }
     }

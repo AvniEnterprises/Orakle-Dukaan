@@ -118,6 +118,7 @@ dependencies {
   implementation(libs.okhttp)
   implementation(libs.play.services.location)
   implementation("com.google.mlkit:barcode-scanning:17.3.0")
+  implementation("com.google.zxing:core:3.5.3")
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
