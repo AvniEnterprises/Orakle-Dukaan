@@ -1012,7 +1012,7 @@ class DukaanRepository(context: Context) {
         try {
             val result = SupabaseClient.fetchAllAgentsFromSupabase()
             if (result.isSuccess) {
-                val remoteAgents = result.getOrNull() ?: emptyList()
+                val remoteAgents: List<AgentEntity> = result.getOrNull() ?: emptyList()
                 for (agent in remoteAgents) {
                     dao.insertAgent(agent)
                 }

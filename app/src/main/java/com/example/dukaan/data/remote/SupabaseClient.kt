@@ -2,6 +2,7 @@ package com.example.dukaan.data.remote
 
 import android.util.Log
 import com.example.dukaan.data.local.AdvanceUdhaarEntity
+import com.example.dukaan.data.local.AgentEntity
 import com.example.dukaan.data.local.AttendanceEventEntity
 import com.example.dukaan.data.local.BusinessEntity
 import com.example.dukaan.data.local.EmployeeEntity
@@ -377,10 +378,18 @@ object SupabaseClient {
                 Result.success(id)
             } else {
                 // If user exists, update their metadata
-                val findUser = findUserByEmail(userEmail)
+                val allUsers = fetchAllRawUsersFromSupabase()
+                val findUser = allUsers.find { u ->
+                    u.optString("email").equals(userEmail, ignoreCase = true) ||
+                    u.optJSONObject("user_metadata")?.optString("agent_id") == agent.id ||
+                    u.optJSONObject("user_metadata")?.optString("agent_code") == agent.agentCode
+                }
                 if (findUser != null) {
                     val updateBody = JSONObject().apply {
                         put("user_metadata", meta)
+                        if (rawPassword.isNotBlank()) {
+                            put("password", rawPassword.trim())
+                        }
                     }
                     val updateReq = Request.Builder()
                         .url("$SUPABASE_URL/auth/v1/admin/users/${findUser.optString("id")}")
