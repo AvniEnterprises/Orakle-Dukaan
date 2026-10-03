@@ -398,22 +398,6 @@ fun LoginScreen(
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Professional instructions card
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Role Access Information:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = OrakleSlate700)
-                Text("• Shop Admin: Register your shop, wait for Superadmin activation, then log in", fontSize = 11.sp, color = OrakleSlate600)
-                Text("• Staff/Employee: Log in with mobile/email and password provided by shop admin", fontSize = 11.sp, color = OrakleSlate600)
-                Text("• Field Agent: Log in with Agent Code (AGT-1001) or Mobile (9876543210) & Password 123456", fontSize = 11.sp, color = OrakleSlate600)
-            }
-        }
     }
 
     if (showInAppUpdateDialog) {

@@ -214,17 +214,16 @@ class DukaanRepository(context: Context) {
                     dao.insertBusiness(shop)
                 }
 
-                // Prune local shops and their cascading data that no longer exist in Supabase
+                // Two-way sync: Push any local shops not yet registered in Supabase
                 val localShops = dao.getAllBusinessesList()
                 for (local in localShops) {
-                    if (!remoteShopIds.contains(local.id) && !remoteShopCodes.contains(local.businessCode)) {
-                        dao.deleteBusinessById(local.id)
-                        dao.deleteEmployeesByBusinessId(local.id)
-                        dao.deleteAttendanceByBusinessId(local.id)
-                        dao.deleteLeavesByBusinessId(local.id)
-                        dao.deleteAdvancesByBusinessId(local.id)
-                        dao.deleteExpensesByBusinessId(local.id)
-                        Log.i("DukaanRepository", "Pruned deleted shop from local database: ${local.id} (${local.name})")
+                    if (!remoteShopIds.contains(local.id) && !remoteShopCodes.contains(local.businessCode) && local.email.isNotBlank()) {
+                        try {
+                            SupabaseClient.registerShopInSupabase(local, local.password.ifBlank { "123456" })
+                            Log.i("DukaanRepository", "Synced local shop to Supabase: ${local.name} (${local.businessCode})")
+                        } catch (e: Exception) {
+                            Log.w("DukaanRepository", "Failed to sync local shop to Supabase: ${local.name}")
+                        }
                     }
                 }
 
@@ -445,14 +444,6 @@ class DukaanRepository(context: Context) {
                     for (l in data.leaves) { dao.insertLeave(l) }
                     for (e in data.expenses) { dao.insertExpense(e) }
                     for (a in data.advances) { dao.insertAdvance(a) }
-
-                    // Prune local staff for this shop if deleted in Supabase
-                    val localEmps = dao.getEmployeesForBusinessList(businessId)
-                    for (localEmp in localEmps) {
-                        if (!remoteEmpIds.contains(localEmp.id)) {
-                            dao.deleteEmployeeById(localEmp.id)
-                        }
-                    }
                 }
             }
         } catch (e: Exception) {
@@ -469,15 +460,8 @@ class DukaanRepository(context: Context) {
             val empResult = SupabaseClient.fetchAllEmployeesFromSupabase(null)
             if (empResult.isSuccess) {
                 val list = empResult.getOrNull() ?: emptyList()
-                val remoteEmpIds = list.map { it.id }.toSet()
                 for (emp in list) {
                     dao.insertEmployee(emp)
-                }
-                val localEmps = dao.getAllEmployeesList()
-                for (localEmp in localEmps) {
-                    if (!remoteEmpIds.contains(localEmp.id)) {
-                        dao.deleteEmployeeById(localEmp.id)
-                    }
                 }
             }
         } catch (e: Exception) {
