@@ -399,52 +399,7 @@ fun LoginScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Quick Role Login / Testing Helpers
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = "Quick Demo / Role Login (Tap to fill):",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = OrakleSlate700
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            emailOrPhone = "AGT-1001"
-                            password = "123456"
-                        },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Field Agent", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0284C7))
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            emailOrPhone = "hypersmile100@gmail.com"
-                            password = "ProjectKnight@161718"
-                        },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Superadmin", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = OrakleRedPrimary)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Professional instructions card
         Card(

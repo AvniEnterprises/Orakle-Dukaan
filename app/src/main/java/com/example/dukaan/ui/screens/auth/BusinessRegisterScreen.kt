@@ -211,25 +211,16 @@ fun BusinessRegisterScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Agent '$agentCode' not verified yet. Code or mobile check karein.",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF92400E)
-                                )
-                            }
-                            TextButton(
-                                onClick = { agentCode = "AGT-1001" },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("Use AGT-1001", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OrakleRedPrimary)
-                            }
+                            Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Agent code '$agentCode' check karein ya agent ka 10-digit mobile number dalein.",
+                                fontSize = 11.sp,
+                                color = Color(0xFF92400E)
+                            )
                         }
                     }
                 }

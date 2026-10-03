@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.example.dukaan.data.model.*
 import com.example.dukaan.data.repository.DukaanRepository
 import com.example.dukaan.service.InAppUpdateDialog
+import com.example.dukaan.service.LocalBackupManager
 import com.example.dukaan.ui.components.*
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
@@ -612,14 +613,90 @@ fun SuperAdminScreen(
                 }
 
                 3 -> {
-                    // TAB 3: Audit Logs
+                    // TAB 3: Audit Logs & Local Backups
                     val auditLogs by repository.getAuditLogs("").collectAsState(initial = emptyList())
+                    var lastBackupTime by remember { mutableStateOf(LocalBackupManager.getLastBackupTimeFormatted(context)) }
+
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                modifier = Modifier.fillMaxWidth().testTag("superadmin_backup_card")
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Backup, contentDescription = null, tint = OrakleRedPrimary, modifier = Modifier.size(20.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Local Daily Backup", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFFDCFCE7)
+                                        ) {
+                                            Text(
+                                                "AUTO DAILY ON",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF15803D),
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Last Backup: $lastBackupTime",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = OrakleSlate700
+                                    )
+                                    Text(
+                                        text = "Room database ka snapshot local device me surakshit save hota hai (Daily automatic).",
+                                        fontSize = 11.sp,
+                                        color = OrakleSlate500
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    val res = LocalBackupManager.performManualBackup(context, repository)
+                                                    if (res.isSuccess) {
+                                                        lastBackupTime = LocalBackupManager.getLastBackupTimeFormatted(context)
+                                                        Toast.makeText(context, "Backup saved: ${res.getOrNull()?.name}", Toast.LENGTH_LONG).show()
+                                                    } else {
+                                                        Toast.makeText(context, "Backup failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = OrakleRedPrimary),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Backup Now (Export)", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        item {
+                            Text("SECURITY & SYSTEM AUDIT LOGS", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = OrakleSlate700)
+                        }
+
                         items(auditLogs) { log ->
                             Card(
                                 shape = RoundedCornerShape(12.dp),

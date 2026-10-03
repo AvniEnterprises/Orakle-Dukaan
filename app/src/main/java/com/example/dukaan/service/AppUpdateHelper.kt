@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -116,11 +117,35 @@ object AppUpdateHelper {
                 reqBuilder.addHeader("Authorization", "Bearer $effectiveToken")
             }
 
-            val response = httpClient.newCall(reqBuilder.build()).execute()
-            val bodyStr = response.body?.string().orEmpty()
+            var response = httpClient.newCall(reqBuilder.build()).execute()
+            var bodyStr = response.body?.string().orEmpty()
+
+            var targetJson: JSONObject? = null
 
             if (response.isSuccessful) {
-                val json = JSONObject(bodyStr)
+                targetJson = JSONObject(bodyStr)
+            } else if (response.code == 404) {
+                // Fallback: Check /releases (handles pre-releases or repos where release isn't marked as latest)
+                response.close()
+                val listUrl = "https://api.github.com/repos/$owner/$repoName/releases?per_page=5"
+                val listReq = Request.Builder()
+                    .url(listUrl)
+                    .addHeader("Accept", "application/vnd.github.v3+json")
+                if (effectiveToken.isNotBlank()) {
+                    listReq.addHeader("Authorization", "Bearer $effectiveToken")
+                }
+                val listResp = httpClient.newCall(listReq.build()).execute()
+                val listBody = listResp.body?.string().orEmpty()
+                if (listResp.isSuccessful) {
+                    val array = JSONArray(listBody)
+                    if (array.length() > 0) {
+                        targetJson = array.getJSONObject(0)
+                    }
+                }
+            }
+
+            if (targetJson != null) {
+                val json = targetJson
                 val tagName = json.optString("tag_name", "v1.2.7")
                 val notes = json.optString("body", "Bug fixes and single-line UI updates.")
                 val publishedAt = json.optString("published_at", "")
@@ -139,13 +164,8 @@ object AppUpdateHelper {
                             val apiAssetUrl = asset.optString("url", "")
                             assetName = name
                             assetApiUrl = apiAssetUrl
-                            downloadUrl = if (effectiveToken.isNotBlank() && apiAssetUrl.isNotBlank()) {
-                                apiAssetUrl
-                            } else if (browserUrl.isNotBlank()) {
-                                browserUrl
-                            } else {
-                                apiAssetUrl
-                            }
+                            // For Public repositories, browser_download_url works directly without token!
+                            downloadUrl = if (browserUrl.isNotBlank()) browserUrl else apiAssetUrl
                             break
                         }
                     }
@@ -168,11 +188,9 @@ object AppUpdateHelper {
                     )
                 )
             } else if (response.code == 404) {
-                val msg = if (effectiveToken.isBlank()) {
-                    "HTTP 404: Repository '$owner/$repoName' is private or no Releases exist!\n\nGitHub private repositories require a GitHub Personal Access Token (PAT). Please enter your Token below, or use Direct APK URL."
-                } else {
-                    "HTTP 404: No Releases found in '$owner/$repoName'. Make sure a Release with an attached .apk asset is created on GitHub."
-                }
+                val msg = "HTTP 404: Repository '$owner/$repoName' par koi Release ya APK nahi mila!\n\n" +
+                        "1. Agar repository Public hai, to GitHub par jayein aur 'Releases' -> 'Draft a new release' karke naya tag (e.g. v1.2.7) banayein aur app-release.apk attach karein.\n" +
+                        "2. Agar repository Private hai, to niche GitHub Token dalein YA 'Direct APK Link' tab me direct link paste karein."
                 Result.failure(Exception(msg))
             } else if (response.code == 401 || response.code == 403) {
                 Result.failure(Exception("HTTP ${response.code}: Access denied. Please check your GitHub Personal Access Token permissions ('repo' scope needed)."))
@@ -198,54 +216,39 @@ object AppUpdateHelper {
     ): Result<File> = withContext(Dispatchers.IO) {
         try {
             val effectiveToken = (token ?: getSavedGitHubToken(context)).trim()
-            var effectiveUrl = if (effectiveToken.isNotBlank() && !assetApiUrl.isNullOrBlank()) {
-                assetApiUrl
-            } else {
-                apkUrl
-            }
+            var targetUrl = if (apkUrl.isNotBlank()) apkUrl else assetApiUrl.orEmpty()
 
-            var reqBuilder = Request.Builder().url(effectiveUrl)
+            var reqBuilder = Request.Builder().url(targetUrl)
 
-            if (effectiveToken.isNotBlank() && (effectiveUrl.contains("github.com") || effectiveUrl.contains("api.github.com"))) {
+            // ONLY send Authorization header if requesting the GitHub API endpoint.
+            // DO NOT send Authorization header to standard browser_download_url / github.com download URLs
+            // because GitHub redirects to AWS S3, and AWS S3 will REJECT requests containing GitHub Authorization headers!
+            if (effectiveToken.isNotBlank() && targetUrl.contains("api.github.com")) {
                 reqBuilder.addHeader("Authorization", "Bearer $effectiveToken")
-            }
-            if (effectiveUrl.contains("api.github.com/repos") && effectiveUrl.contains("/assets/")) {
                 reqBuilder.addHeader("Accept", "application/octet-stream")
             }
 
             var response = httpClient.newCall(reqBuilder.build()).execute()
 
-            // If 404 and we have a token, or if browser_download_url returned 404 on a private repo:
-            if (response.code == 404 && effectiveToken.isNotBlank() && effectiveUrl.contains("github.com") && !effectiveUrl.contains("api.github.com")) {
+            // If browser_download_url fails (e.g. 404 on private repo) and we have an assetApiUrl + token:
+            if (!response.isSuccessful && !assetApiUrl.isNullOrBlank() && targetUrl != assetApiUrl) {
                 response.close()
-                val cleanUrl = effectiveUrl.removePrefix("https://github.com/").removePrefix("http://github.com/")
-                val parts = cleanUrl.split("/")
-                if (parts.size >= 2) {
-                    val owner = parts[0]
-                    val repoName = parts[1]
-                    val releaseRes = checkLatestRelease(context, "https://github.com/$owner/$repoName", effectiveToken)
-                    val info = releaseRes.getOrNull()
-                    if (info != null && info.assetApiUrl.isNotBlank()) {
-                        effectiveUrl = info.assetApiUrl
-                        val retryReq = Request.Builder()
-                            .url(effectiveUrl)
-                            .addHeader("Authorization", "Bearer $effectiveToken")
-                            .addHeader("Accept", "application/octet-stream")
-                            .build()
-                        response = httpClient.newCall(retryReq).execute()
-                    }
+                val fallbackReq = Request.Builder().url(assetApiUrl)
+                if (effectiveToken.isNotBlank()) {
+                    fallbackReq.addHeader("Authorization", "Bearer $effectiveToken")
                 }
+                fallbackReq.addHeader("Accept", "application/octet-stream")
+                response = httpClient.newCall(fallbackReq.build()).execute()
             }
 
             if (!response.isSuccessful) {
                 val code = response.code
                 val err = if (code == 404) {
                     "Download failed with HTTP 404.\n\n" +
-                    "Karan (Reason): Repository PRIVATE hone ke karan GitHub releases direct download nahi karne deta bina GitHub Token ke, ya fir GitHub release me koi .apk asset upload nahi hai.\n\n" +
+                    "Karan (Reason): GitHub release me koi .apk file attach nahi hai, ya URL badal gaya hai.\n\n" +
                     "Solution:\n" +
-                    "1. 'GitHub Token' box me apna Token (PAT) dalein ('repo' permission ke sath), YA\n" +
-                    "2. GitHub par repository ko 'Public' set karein, YA\n" +
-                    "3. 'Direct APK Link' tab me direct link paste karein."
+                    "1. GitHub par repository me 'Releases' khol kar check karein ki .apk file attached hai.\n" +
+                    "2. YA 'Direct APK Link' tab me Google Drive / direct link paste karein."
                 } else if (code == 401 || code == 403) {
                     "HTTP $code: GitHub access denied. Please check your GitHub Personal Access Token."
                 } else {

@@ -33,6 +33,7 @@ import com.example.dukaan.data.model.UserRole
 import com.example.dukaan.data.repository.DukaanRepository
 import com.example.dukaan.service.SessionManager
 import com.example.dukaan.service.InAppUpdateDialog
+import com.example.dukaan.service.LocalBackupManager
 import com.example.dukaan.ui.components.OrakleLogoBrand
 import com.example.dukaan.ui.screens.admin.AdminMainScreen
 import com.example.dukaan.ui.screens.agent.AgentMainScreen
@@ -109,6 +110,7 @@ fun OrakleDukaanApp(
     LaunchedEffect(Unit) {
         repository.seedDefaultAgentIfEmpty()
         repository.syncAgentsFromSupabase()
+        LocalBackupManager.performDailyBackupIfDue(context, repository)
     }
 
     Surface(
