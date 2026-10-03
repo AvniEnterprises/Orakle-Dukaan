@@ -77,16 +77,21 @@ fun SuperAdminScreen(
 
     var isSyncing by remember { mutableStateOf(false) }
 
-    // Instant Live Auto-Refresh polling loop (Every 2.5 seconds in foreground)
+    // Live Background Auto-Sync loop (every 20 seconds)
     LaunchedEffect(Unit) {
         repository.seedDefaultAgentIfEmpty()
         while (true) {
             isSyncing = true
-            repository.syncBusinessesFromSupabase()
-            repository.syncAllEmployeesFromSupabase()
-            repository.syncAgentsFromSupabase()
-            isSyncing = false
-            kotlinx.coroutines.delay(2500)
+            try {
+                repository.syncBusinessesFromSupabase()
+                repository.syncAllEmployeesFromSupabase()
+                repository.syncAgentsFromSupabase()
+            } catch (e: Exception) {
+                // Ignore background sync errors
+            } finally {
+                isSyncing = false
+            }
+            kotlinx.coroutines.delay(20000)
         }
     }
 

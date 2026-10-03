@@ -1554,10 +1554,21 @@ object SupabaseClient {
         }
     }
 
+    @Volatile
+    private var cachedRawUsers: List<JSONObject> = emptyList()
+    @Volatile
+    private var lastRawUsersFetchTime = 0L
+    private const val USERS_CACHE_TTL_MS = 8000L // 8 seconds cache to prevent duplicate remote calls
+
     /**
-     * Helper to fetch all raw users from Supabase Auth admin API.
+     * Helper to fetch all raw users from Supabase Auth admin API with TTL cache.
      */
     private suspend fun fetchAllRawUsersFromSupabase(): List<JSONObject> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (cachedRawUsers.isNotEmpty() && (now - lastRawUsersFetchTime) < USERS_CACHE_TTL_MS) {
+            return@withContext cachedRawUsers
+        }
+
         try {
             val url = "$SUPABASE_URL/auth/v1/admin/users?per_page=100"
             val request = Request.Builder()
@@ -1567,27 +1578,30 @@ object SupabaseClient {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                Log.w(TAG, "fetchAllRawUsers error: ${response.code}")
-                return@withContext emptyList()
-            }
+            httpClient.newCall(request).execute().use { response ->
+                val resStr = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "fetchAllRawUsers notice: ${response.code}")
+                    return@withContext cachedRawUsers
+                }
 
-            val json = JSONObject(resStr)
-            val usersArray = json.optJSONArray("users") ?: return@withContext emptyList()
-            val list = mutableListOf<JSONObject>()
-            for (i in 0 until usersArray.length()) {
-                list.add(usersArray.getJSONObject(i))
+                val json = JSONObject(resStr)
+                val usersArray = json.optJSONArray("users") ?: return@withContext cachedRawUsers
+                val list = mutableListOf<JSONObject>()
+                for (i in 0 until usersArray.length()) {
+                    list.add(usersArray.getJSONObject(i))
+                }
+                cachedRawUsers = list
+                lastRawUsersFetchTime = System.currentTimeMillis()
+                list
             }
-            list
         } catch (e: Exception) {
             if (e.isCancellation()) {
                 Log.d(TAG, "fetchAllRawUsersFromSupabase cancelled")
-                return@withContext emptyList()
+                return@withContext cachedRawUsers
             }
-            Log.e(TAG, "fetchAllRawUsersFromSupabase error", e)
-            emptyList()
+            Log.w(TAG, "fetchAllRawUsersFromSupabase notice: ${e.message}")
+            cachedRawUsers
         }
     }
 
